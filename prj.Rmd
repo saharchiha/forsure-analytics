@@ -1,0 +1,2516 @@
+---
+title: "Workshop"
+author: "sahar chiha"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import the 1st Dataset 
+
+Import **freMTPLfreq** dataset:
+```{r}
+library(CASdatasets)
+data("freMTPLfreq",package = "CASdatasets")
+View(freMTPLfreq)
+
+```
+
+```{r}
+# Function to check if a variable has unique values
+has_unique_values <- function(data, column_name) {
+  unique_count <- length(unique(data[[column_name]]))
+  total_count <- nrow(data)
+  
+  if (unique_count == total_count) {
+    return(TRUE)
+  } else {
+    return(FALSE)
+  }
+}
+
+# Test the function
+column_to_check <- "PolicyID"
+if (has_unique_values(freMTPLfreq, column_to_check)) {
+  cat("The variable", column_to_check, "has all unique values.\n")
+} else {
+  cat("The variable", column_to_check, "does NOT have all unique values.\n")
+}
+```
+
+
+## Import the 2nd Databset 
+Import **freMTPLsev** dataaset:
+```{r}
+data("freMTPLsev",package = "CASdatasets")
+View(freMTPLsev)
+
+```
+
+```{r}
+# Test the function
+column_to_check <- "PolicyID"
+if (has_unique_values(freMTPLsev, column_to_check)) {
+  cat("The variable", column_to_check, "has all unique values.\n")
+} else {
+  cat("The variable", column_to_check, "does NOT have all unique values.\n")
+}
+
+```
+
+
+
+```{r}
+library(dplyr)
+freMTPLsev <- freMTPLsev %>%
+  group_by(PolicyID) %>%
+  summarise(ClaimAmount = sum(ClaimAmount))
+print(freMTPLsev)
+
+```
+---> We have applied a grouping operation to the data, summing ClaimAmount for each distinct PolicyID, which provides an aggregate measure of claims by policy.
+
+## Data merging
+```{r}
+library(dplyr)
+freMTPLfreq$PolicyID = as.integer(freMTPLfreq$PolicyID)
+Dataset <- freMTPLfreq %>% left_join(freMTPLsev, by = "PolicyID")
+print(Dataset)
+```
+Interpretations:
+---> Dataset is containing both frequency and severity information for each policy.
+
+---> The PolicyID column is ensured to be of integer type.
+
+## Exploring the final Database
+```{r}
+head(Dataset)
+```
+**variable types**
+```{r}
+glimpse(Dataset)
+```
+Interpretation:
+---->the variable ClaimAmmount is containing missing values.
+## Data cleaning:
+**Missing values**
+```{r}
+# Check for NA values in the entire dataset
+is.na(Dataset)
+
+# Count NA values per column
+colSums(is.na(Dataset))
+
+# Check rows with complete cases (no NA values)
+complete.cases(Dataset)
+```
+Interpretation:
+--> Only the variable claimAmmount has missing values (nb missing values = 397779).
+
+
+```{r}
+# Check if all instances where claimNB is 0 also have claimAmount as 0
+check_claim <- all(is.na(Dataset$claimAmount[Dataset$claimNB == 0]))
+
+# Output the result
+if (check_claim) {
+  cat("All instances where claimNb is 0 also have claimAmount as NA.\n")
+} else {
+  cat("There are instances where claimNb is 0 but claimAmount is NOT NA.\n")
+}
+```
+Logically, if a Policy holder didn't affect any claim (claimNb=0),The claimAmmount should be 0.
+
+```{r}
+Dataset <- Dataset %>%
+  mutate(across(where(is.numeric), ~ ifelse(is.na(.), 0, .)))
+
+# Print updated data
+print("Data after replacing NA with 0:")
+print(Dataset)
+```
+Interpretation:
+----> Dataset after replacing the NA values of the Varibale ClaimAmmount by 0.
+
+```{r}
+summary(Dataset)
+```
+
+
+**Duplicates**
+```{r}
+# Check for duplicate rows
+has_duplicates <- any(duplicated(Dataset))
+
+# Output the result
+if (has_duplicates) {
+  cat("The dataset contains duplicate rows.\n")
+} else {
+  cat("The dataset does NOT contain duplicate rows.\n")
+}
+```
+
+
+```{r}
+print(Dataset)
+```
+
+**Outliers**
+Checking if there are outliers in the dataset!
+```{r}
+library(dplyr)
+library(tidyr)
+library(tidyselect)
+library(ggplot2)
+
+#Exclude PolicyID feature
+Dataset <- Dataset %>% dplyr::select(-PolicyID)
+
+# Detect numeric columns
+numeric_columns <- Dataset %>% dplyr::select(where(is.numeric))
+
+# Detect factor columns
+factor_columns <- Dataset %>%dplyr:: select(where(is.factor) | where(is.character))
+
+# Reshape numeric columns for histograms
+if (ncol(numeric_columns) > 0) {
+  # Reshape data into long format
+  data_numeric_long <- numeric_columns %>%
+    pivot_longer(everything(), names_to = "variable", values_to = "value")
+  
+  # Exclude ClaimAmount and ClaimNb from the long data
+  data_numeric_long <- data_numeric_long %>%
+    filter(!variable %in% c("ClaimAmount", "ClaimNb"))
+  
+  # Plot histograms for numeric variables
+  ggplot(data_numeric_long, aes(x = value)) +
+    geom_histogram(binwidth = 10, fill = "blue", color = "black") +
+    facet_wrap(~ variable, scales = "free") +
+    labs(title = "Histograms of Numeric Variables",
+         x = "Value",
+         y = "Frequency") +
+    theme_minimal()
+} else {
+  cat("No numeric columns found.\n")
+}
+# Log-transformed version
+ggplot(numeric_columns['ClaimAmount'], aes(x = ClaimAmount + 1)) +  # Adding 1 to handle zeros
+  geom_histogram(fill = "blue", color = "black", bins = 30) +
+  scale_x_log10() +
+  labs(title = "Distribution of Claim Amounts (Log Scale)",
+       x = "Claim Amount (log scale)") +
+  theme_minimal()
+# Create a bar plot for ClaimNb
+ggplot(numeric_columns['ClaimNb'], aes(x = factor(ClaimNb))) +
+  geom_bar(fill = "steelblue", color = "black") +
+  labs(title = "Distribution of Number of Claims",
+       x = "Number of Claims",
+       y = "Frequency") +
+  theme_minimal() +
+  scale_x_discrete(limits = function(x) as.character(sort(as.numeric(unique(x))))) # Ensure proper ordering
+
+# Reshape factor columns for bar plots
+if (ncol(factor_columns) > 0) {
+  data_factor_long <- factor_columns %>%
+    pivot_longer(everything(), names_to = "variable", values_to = "value")
+  
+  # Plot bar plots for factor variables
+  ggplot(data_factor_long, aes(x = value)) +
+    geom_bar(fill = "pink", color = "black") +
+    facet_wrap(~ variable, scales = "free") +
+    labs(title = "Bar Plots of Factor Variables",
+         x = "Value",
+         y = "Frequency") +
+    theme_minimal()
+} else {
+  cat("No factor columns found.\n")
+}
+
+```
+
+Interpretations:
+***ClaimAmount***
+ **Dominance of Small Claims:**
+
+ There is an extremely tall bar at the lower end of the x-axis (around 1e+01), indicating that the  majority of claims are small or zero.
+
+  --->This is typical in insurance data, where most claims involve minor incidents or no payout at  all.
+
+ **Few Moderate and Large Claims:**
+
+ There are significantly fewer observations as we move to higher claim amounts (1e+03 and beyond).
+
+ --->This reflects the heavy-tailed nature of insurance claims: while large claims do occur, they  are rare compared to small claims.
+
+ **Skewness**:
+
+ The distribution is highly right-skewed, with most values concentrated at the lower end and a  long tail extending toward larger values.
+
+ **Risk Management:**
+
+ The dominance of small claims suggests that policies often cover low-cost incidents. However, the  presence of a long tail indicates that rare but high-value claims can have a significant financial impact.
+
+ **Pricing Strategy:**
+
+Insurers might need to account for this imbalance when setting premiums, ensuring that rare large claims are adequately covered without overburdening policyholders with small claims.
+
+**Modeling Implications**
+
+--->Given the heavy-tailed nature of the data, traditional statistical models may not perform well. Advanced techniques like generalized linear models (GLMs) or extreme value theory could be 
+more appropriate for modeling this distribution.
+
+***ClaimNb***
+
+ **High Frequency of Zero Claims:**
+The tallest bar corresponds to policies with zero claims, indicating that most policyholders did not file any claims during the observed period. This is common in insurance datasets where many customers remain claim-free.
+
+**Decreasing Frequency for Higher Claim Counts:**
+
+As the number of claims increases (1, 2, 3, etc.), the frequency drops sharply. Very few policies have multiple claims.
+
+**Limited Range:**
+
+The number of claims per policy is small (maximum observed is 4), suggesting that repeat claims are uncommon.
+
+**Insights:**
+-->Portfolio Risk Assessment:
+
+Policies with zero claims represent low-risk customers, while those with multiple claims may indicate higher risk or potential fraud.
+
+--->Segmentation Opportunities:
+
+Analyzing customer segments (e.g., by demographics or policy type) may reveal patterns in claim frequency and help identify high-risk groups.
+
+--->Predictive Modeling:
+
+Statistical models like Poisson regression or Negative Binomial regression can be used to predict claim frequencies.
+
+
+```{r}
+print(Dataset)
+```
+
+Testing the normality of variable:
+
+---> In order to select an appropriate method to handle outliers without distorting the dataset's structure or introducing bias, we should test for normality of our variables. Since the variables are clearly non-normal based on the histograms, we should opt for robust imputation techniques that do not rely on normality assumptions.
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Detect numeric variables
+numeric_columns <- Dataset %>% dplyr::select(where(is.numeric))
+
+# Function to test normality using Kolmogorov-Smirnov test
+test_normality_ks <- function(data) {
+  results <- data %>%
+    summarise(across(everything(), ~ ks.test(., "pnorm", mean = mean(.), sd = sd(.))$p.value))  # KS test
+  return(results)
+}
+
+# Test normality for all numeric variables
+normality_results <- test_normality_ks(numeric_columns)
+
+# Identify normally and non-normally distributed variables
+normally_distributed <- normality_results %>% dplyr::select(where(~ all(. > 0.05)))  # p-value > 0.05
+non_normally_distributed <- normality_results %>% dplyr::select(where(~ all(. <= 0.05)))   # p-value <= 0.05
+
+# Print results
+cat("Normally Distributed Variables:\n")
+print(names(normally_distributed))
+
+cat("\nNon-Normally Distributed Variables:\n")
+print(names(non_normally_distributed))
+
+# Visualize distributions using density plots and Q-Q plots
+for (col in names(numeric_columns)) {
+  # Density plot
+  density_plot <- ggplot(Dataset, aes(x = .data[[col]])) +
+    geom_density(fill = "blue", alpha = 0.5) +
+    labs(title = paste("Density Plot of", col),
+         x = col,
+         y = "Density") +
+    theme_minimal()
+  
+  # Q-Q plot
+  qq_plot <- ggplot(Dataset, aes(sample = .data[[col]])) +
+    geom_qq() +
+    geom_qq_line(color = "red") +
+    labs(title = paste("Q-Q Plot of", col),
+         x = "Theoretical Quantiles",
+         y = "Sample Quantiles") +
+    theme_minimal()
+  
+  # Display plots
+  print(density_plot)
+  print(qq_plot)
+}
+```
+
+----> all the numeric variables are not normally distributed. Therefore, the Interquartile Range (IQR) Method is proposed to verify the existence of the outliers.
+
+
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+
+# Function to check for outliers using the IQR method
+check_outliers_iqr <- function(data, column) {
+  # Calculate Q1, Q3, and IQR
+  Q1 <- quantile(data[[column]], 0.25, na.rm = TRUE)
+  Q3 <- quantile(data[[column]], 0.75, na.rm = TRUE)
+  IQR <- Q3 - Q1
+  
+  # Define lower and upper bounds for outliers
+  lower_bound <- Q1 - 1.5 * IQR
+  upper_bound <- Q3 + 1.5 * IQR
+  
+  # Detect outliers
+  outliers <- data[[column]] < lower_bound | data[[column]] > upper_bound
+  
+  # Return TRUE if outliers are present, FALSE otherwise
+  return(any(outliers, na.rm = TRUE))
+}
+
+# Check for outliers in all numeric columns
+numeric_columns <- names(Dataset)[sapply(Dataset, is.numeric)]  # Get numeric column names
+outlier_summary <- sapply(numeric_columns, function(col) check_outliers_iqr(Dataset, col))
+
+# Print the outlier summary
+print(outlier_summary)
+
+# Optional: Visualize outliers using boxplots
+library(ggplot2)
+
+for (col in numeric_columns) {
+  boxplot <- ggplot(Dataset, aes(x = .data[[col]])) +
+    geom_boxplot(fill = "lightblue") +
+    labs(title = paste("Boxplot of", col),
+         x = col,
+         y = "Value") +
+    theme_minimal()
+  
+  print(boxplot)
+}
+
+```
+```{r}
+print(Dataset)
+```
+
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(MASS)
+
+# Winsorization (1%-99%):
+
+lower_cap <- quantile(Dataset$ClaimNb, 0.01, na.rm = TRUE)
+upper_cap <- quantile(Dataset$ClaimNb, 0.99, na.rm = TRUE)
+Dataset$ClaimNb <- pmin(pmax(Dataset$ClaimNb, lower_cap), upper_cap)
+
+
+lower_cap <- quantile(Dataset$CarAge, 0.01, na.rm = TRUE)
+upper_cap <- quantile(Dataset$CarAge, 0.99, na.rm = TRUE)
+Dataset$CarAge <- pmin(pmax(Dataset$CarAge, lower_cap), upper_cap)
+
+# Handle zero values with a small constant if necessary for ClaimAmount:
+Dataset$ClaimAmount_log <- log(Dataset$ClaimAmount + 1)  # Adding 1 to handle zeros
+
+#Winsorization (95% capping only for high values):
+cap_value <- quantile(Dataset$DriverAge, 0.95, na.rm = TRUE)
+Dataset$DriverAge[Dataset$DriverAge > cap_value] <- cap_value
+
+
+# Apply Winsorization for the Density feature:
+
+library(e1071)  # For skewness calculation
+
+# Compute skewness
+skew_value <- skewness(Dataset$Density, na.rm = TRUE)
+
+# Define adaptive capping limits based on skewness
+if (skew_value > 1) {  # Right-skewed distribution
+  lower_cap <- quantile(Dataset$Density, 0.01, na.rm = TRUE)
+  upper_cap <- quantile(Dataset$Density, 0.90, na.rm = TRUE)  # More aggressive for right skew
+} else if (skew_value < -1) {  # Left-skewed distribution
+  lower_cap <- quantile(Dataset$Density, 0.05, na.rm = TRUE)  # More aggressive for left skew
+  upper_cap <- quantile(Dataset$Density, 0.99, na.rm = TRUE)
+} else {  # Mildly skewed
+  lower_cap <- quantile(Dataset$Density, 0.05, na.rm = TRUE)
+  upper_cap <- quantile(Dataset$Density, 0.95, na.rm = TRUE)
+}
+
+# Apply Winsorization
+Dataset$Density <- pmin(pmax(Dataset$Density, lower_cap), upper_cap)
+
+#visualizing the transformed data for ClaimAmount:
+par(mfrow=c(1,2))
+hist(Dataset$ClaimAmount, main="Original ClaimAmount")
+hist(Dataset$ClaimAmount_log, main="Transformed ClaimAmount")
+
+```
+
+Imputations methedos used for every feature are:
+-->ClaimNb: 	Winsorization (1%-99%) 
+   -->Discrete count, prevents extreme claims from dominating.
+-->CarAge: Winsorization (1%-99%)	 
+   --->Keeps data realistic without losing information.
+--->ClaimAmount:	log transformation
+   --->Values are valid 
+--->Density: Adaptive Winsorization (based on skewness)	
+   ---->Dynamically caps outliers based on distribution shape.
+--->DriverAge:	Winsorization (95% capping only for high values)	
+   --->Only prevents unrealistic old age values.
+
+## Data description:
+```{r}
+summary(Dataset)
+```
+
+## Univariate analysis:
+
+```{r}
+print(Dataset)
+```
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+
+
+# Identify categorical var:
+qualitative_vars <- names(Dataset)[sapply(Dataset, function(x) is.character(x) | is.factor(x))]
+
+# Visualize plots of each categorical var
+for (var in qualitative_vars) {
+  p <- ggplot(Dataset, aes(x = Dataset[[var]])) +
+    geom_bar(fill = "steelblue") +
+    labs(
+      title = paste("Barplot of", var),
+      x = var,
+      y = "Frequency"
+    ) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+  
+  print(p)
+}
+```
+Interpretations:
+
+**Boxplot of Power**
+
+--->The letters (d, e, f, g, h, i, j, k, l, m, n, o) likely represent vehicle power categories or engine power bands.
+--->Categories "f" and "g" are the most common power ranges in the dataset, suggesting these are the most frequently insured vehicle power types (approximately 95,000 and 90,000 vehicles respectively).
+--->Power categories "d" through "g" represent the majority of insured vehicles, which suggests that mid-range power vehicles dominate the insurance portfolio.
+--->The sharp decline after category "g" indicates that higher-powered vehicles (h through o) become progressively less common in the insurance portfolio.
+---->The highest power categories (m, n, o) are very rare in the dataset, which aligns with what ---->We'd expect - high-powered vehicles are less common on the road and thus less frequently insured.
+
+**This distribution is important for insurance analysis because vehicle power often correlates with risk factors. Higher-powered vehicles may be associated with different claim frequencies or severities compared to lower-powered ones. Understanding this distribution helps insurers properly assess their risk exposure across different vehicle types.**
+
+**Boxplot of Brand**
+
+--->The Renault, Nissan, or Citroën category has the highest count, with over 200,000 occurrences.
+--->The Japanese (except Nissan) or Korean category follows, with around 75,000 occurrences.
+--->Other categories such as Opel, General Motors, or Ford and Volkswagen, Audi, Skoda, or Seat have a moderate count.
+--->The "other" category has the lowest frequency.
+**Brand Popularity and Its Impact on Insurance:**
+--->Renault, Nissan, or Citroën are the most represented brands, which could indicate that they are commonly insured, either because they are widely available on the market or because they are more affordable and popular among drivers.
+Japanese (except Nissan) and Korean cars are also well-represented, possibly due to their reliability and lower maintenance costs.
+**Possible Link to Insurance Premiums:**
+
+--->High-end brands such as Mercedes, Chrysler, or BMW have a lower presence, which may indicate either higher insurance costs (leading to fewer insured vehicles in this category) or a smaller market share.
+--->The "other" category is the least represented, likely corresponding to exotic or rare car models that are not frequently insured.
+**Potential Risks and Claims Frequency:**
+--->Some brands may be more associated with claims or higher repair costs, influencing their frequency in the dataset.
+--->A high number of Renault, Nissan, or Citroën vehicles could also suggest that they are more frequently involved in insurance claims, either due to their large numbers or their driving and usage characteristics.
+
+**Boxplot of Brand**
+
+-->Centre has the highest number of insured vehicles, significantly higher than all other regions.
+--->Île-de-France follows, which is expected since it includes Paris, a densely populated area.
+--->Bretagne and Pays-de-la-Loire also have a considerable number of insured vehicles.
+--->Limousin and Basse-Normandie have the lowest frequency, indicating fewer insured vehicles.
+
+Possible Explanations:
+
+--->Population Density: Higher population regions (like Île-de-France) naturally have more insured vehicles.
+--->Vehicle Ownership Trends: Rural vs. urban areas may impact the number of insured cars (e.g., some urban areas rely more on public transport).
+--->Insurance Policies and Regulations: Certain regional factors might influence the number of insurance contracts.
+
+**Barplot of Gas**
+
+
+-->The number of diesel and regular (gasoline) vehicles is nearly equal, with both categories having around 200,000 insured vehicles.
+
+Possible Explanations:
+
+--->Market Trends: In many countries, diesel vehicles were historically preferred for long-distance driving and commercial use, while gasoline vehicles were more common for urban and personal use.
+--->Regulatory Changes: In recent years, some regions have started phasing out diesel vehicles due to environmental concerns, which may explain the near-equal distribution.
+--->Insurance Perspective: The choice of fuel type might influence insurance premiums, as diesel cars typically have higher repair costs and may be more expensive to insure.
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Identify numeric columns
+numeric_cols <- sapply(Dataset, is.numeric)
+
+#Extract numeric comlumns
+numeric_vars <- Dataset[, numeric_cols, drop = FALSE]
+
+# Descrptive statistic for numeric columns
+summary(numeric_vars)
+
+# Histogram for each numeric var
+for (col in colnames(numeric_vars)) {
+  hist(numeric_vars[[col]], 
+       main = paste("Histogram of", col), 
+       xlab = col, 
+       col = "steelblue")
+}
+
+# Boxplot for each numerci var
+for (col in colnames(numeric_vars)) {
+  boxplot(numeric_vars[[col]], 
+          main = paste("Boxplot of", col), 
+          col = "orange")
+}
+
+
+```
+
+Interpretations:
+
+**Histogram of ClaimNb:**
+-->Highly Zero-Inflated Distribution
+
+The histogram shows that a vast majority of the observations have ClaimNb = 0, meaning no claims were filed.
+There are very few non-zero values (e.g., ClaimNb = 1 appears to be the next most frequent value).
+This suggests that most policyholders do not file claims.
+
+--->Discrete and Sparse Data
+
+ClaimNb is a count variable (integer values representing the number of claims).
+The distribution is extremely right-skewed, with most values being zero and very few having nonzero counts.
+It is likely following a Poisson or Negative Binomial distribution, given that the count of claims is low for most policyholders.
+
+--->Potential Issues & Next Steps
+
+--->Overdispersion: Since there are very few claims, a standard Poisson model might not fit well. A Negative Binomial regression could be considered if variance exceeds the mean.
+
+--->Zero-Inflation: Given the extremely high number of zeros, a Zero-Inflated Poisson (ZIP) or Zero-Inflated Negative Binomial (ZINB) model might be more appropriate.
+
+--->Transformations: Since it's a count variable, direct transformations like log are not ideal. Instead, consider:
+Binning: Convert it into categories (e.g., 0 claims, 1 claim, 2+ claims).
+--->Modeling strategies: Use a hurdle model to separate "no claims" from "some claims".
+
+**Histogram of Exposure:**
+-->Bimodal Distribution
+
+The histogram suggests a bimodal distribution with two peaks:
++One smaller peak around 0.0.
++A very high peak at 1.0.
+--->This indicates that a large portion of the dataset has an Exposure value of exactly 1, meaning those policies were fully active for the entire period.
+-->Skewness and Zero-Inflation
+
+--->The left side of the histogram (near 0.0) shows a concentration of observations, suggesting many policies with very low exposure.
+--->The distribution appears right-skewed, but with a significant spike at 1.0, meaning most policies are either very low or exactly 1. 
+
+--->Potential Issues & Next Steps
+
+--->The high number of exact 1.0 values might indicate:
+--->A business rule (e.g., full-year policies have Exposure = 1).
+-->Censoring or rounding of data.
+--->The lower exposure values suggest policies that were active for only part of the period.
+
+**Histogram of CarAge:**
+--->Distribution:
+
+The data appears to be somewhat evenly spread across different car ages.
+Peaks are observed around ages 3 and 5, suggesting that these are the most common car ages.
+There are fewer cars older than 6 years.
+
+--->Implication:
+
+The majority of the cars in this dataset are relatively new (0–5 years old).
+The drop in frequency for cars older than 6 years may indicate that fewer old cars are in the dataset, possibly due to replacement, maintenance costs, or other market factors.
+
+**Histogram of DriverAge:**
+--->Distribution:
+The majority of drivers are between 30 and 50 years old, with the highest frequencies observed in this range.
+The number of drivers starts increasing from age 20, peaks around 30 to 50, and then declines after 50.
+A sharp increase at age 70 is visible, possibly due to data grouping or specific policies affecting drivers at this age.
+--->Implications:
+Most drivers fall within the working-age population (30-50), likely due to active employment and commuting needs.
+The decline after 50 suggests fewer older drivers, possibly due to retirement or health-related factors.
+The sudden spike at age 70 could indicate a specific categorization in the dataset (e.g., grouping all drivers 70+ into a single bin).
+
+**Histogram of Density:**
+--->Distribution Shape:
+
+The histogram is highly right-skewed, meaning most values are concentrated on the lower end of the density scale, while a small number of cases exhibit much higher density values.
+A large proportion of data points fall around -0.5 and below, indicating that most insured entities (e.g., policyholders or claims) are in low-density areas.
+There is a secondary peak at approximately 1.5, which suggests that a distinct subset of data points exists, possibly representing high-density urban areas.
+--->Possible Implications:
+
+Risk Segmentation: The strong skewness suggests a disproportionate distribution of policyholders—a majority in rural/suburban areas (low density) and a smaller, possibly high-risk group in urban areas (high density).
+
+Claim Frequency & Severity:
+Low-density areas might have fewer but less severe claims (e.g., lower accident rates due to less traffic).
+High-density regions (urban areas) may experience more frequent and severe claims due to higher traffic congestion, theft rates, and accident likelihood.
+
+Pricing & Underwriting:
+Insurers may need differentiated pricing models for high-density vs. low-density areas.
+High-density clusters may indicate higher insurance premiums due to increased risk exposure.
+
+
+## Analyse bivariée:
+```{r}
+print(Dataset)
+```
+
+```{r}
+library(corrplot)
+
+cor_matrix <- cor(Dataset[sapply(Dataset,is.numeric)], method = "pearson")
+cor_matrix
+```
+**Correlation Matrix:**
+```{r}
+cor_matrix <- corrplot(cor_matrix, method = "color", type = "upper", tl.col = "black", tl.srt = 45)
+```
+Interpretations:
+--->The diagonal shows perfect correlation (1.0) of each variable with itself, as expected.
+--->ClaimNb (number of claims) has a moderate positive correlation with ClaimAmount, meaning that as the number of claims increases, the claim amount tends to increase as well.
+
+--->Exposure appears to have:
+
+A positive correlation with ClaimNb, suggesting that longer policy exposure periods lead to more claims
+A slight negative correlation with DriverAge, potentially indicating that younger drivers tend to have longer exposure periods
+
+
+--->CarAge shows:
+
+Little to no correlation with ClaimAmount
+A negative correlation with DriverAge, indicating that older drivers tend to have newer cars
+
+
+--->DriverAge has a negative correlation with Density, suggesting that younger drivers are more likely to live in densely populated areas.
+--->Some correlations are marked with question marks (?), likely indicating that these relationships are either not statistically significant or the data is missing.
+--->The color scale ranges from dark blue (strong positive correlation, +1) to dark red (strong negative correlation, -1), with lighter shades indicating weaker correlations near zero.
+--->The question marks (?) showing in the correlogram likely represent NA (Not Available) or missing correlation values between ClaimAmount, CarAge, and other variables due to /
+
+Zero-inflation issue: Insurance claim data typically contains many zeros (policyholders with no claims), which can cause computational challenges when calculating correlations, especially after transformations.
+ 
+##ClaimAmount and ClaimNb Distrubtion Map:
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(stringi)
+
+# Load the French regions map
+url <- "https://github.com/gregoiredavid/france-geojson/raw/master/regions.geojson"
+France_map <- st_read(url)
+
+
+# Clean and harmonize region names in your dataset
+Dataset <- Dataset %>%
+  mutate(Region = tolower(trimws(Region)),  # Clean and lowercase region names
+         Region = stri_trans_general(Region, "Latin-ASCII"))  # Remove accents
+
+# Create a mapping of old region names to new region names
+region_mapping <- c(
+  "aquitaine" = "nouvelle-aquitaine",
+  "basse-normandie" = "normandie",
+  "haute-normandie" = "normandie",
+  "centre" = "centre-val de loire",
+  "limousin" = "nouvelle-aquitaine",
+  "nord-pas-de-calais" = "hauts-de-france",
+  "pays-de-la-loire" = "pays de la loire",
+  "poitou-charentes" = "nouvelle-aquitaine"
+)
+
+# Apply the mapping to your dataset
+Dataset <- Dataset %>%
+  mutate(Region = ifelse(Region %in% names(region_mapping), region_mapping[Region], Region))
+
+# Aggregate data by region
+region_claims <- Dataset %>%
+  group_by(Region) %>%
+  summarise(Total_Claim = sum(ClaimNb, na.rm = TRUE),
+            Total_ClaimAmount = sum(ClaimAmount_log, na.rm = TRUE))
+
+# Clean and harmonize region names in France_map
+France_map <- France_map %>%
+  mutate(nom = tolower(trimws(nom)),
+         nom = stri_trans_general(nom, "Latin-ASCII"))
+
+# Merge your dataset with France_map
+France_map <- France_map %>%
+  left_join(region_claims, by = c("nom" = "Region"))
+
+# Visualize the number of claims
+ggplot(data = France_map) +
+  geom_sf(aes(fill = Total_Claim), color = "black", size = 0.2) +
+  scale_fill_gradient(low = "lightblue", high = "red", na.value = "grey90", name = "Nb of claims") +
+  labs(title = "Number of claims per region in France") +
+  geom_sf_text(aes(label = nom), color = "black", size = 3) +
+  theme_minimal()
+
+# Visualize the total claim amount
+ggplot(data = France_map) +
+  geom_sf(aes(fill = Total_ClaimAmount), color = "black", size = 0.2) +
+  scale_fill_gradient(low = "lightblue", high = "red", na.value = "grey90", name = "Amount of claims ") +
+  labs(title = "Amount of claims per region in France") +
+  geom_sf_text(aes(label = nom), color = "black", size = 3) +
+  theme_minimal()
+```
+Interpretations:
+---> Regions with Higher Damages:
+
+Regions such as Bretagne, Normandie, Île-de-France, and Nouvelle-Aquitaine are shaded darker, indicating that they have higher amounts of reported damages compared to other regions.
+
+--->Regions with Lower Damages:
+
+Regions like Grand Est, Auvergne-Rhône-Alpes, and Provence-Alpes-Côte d'Azur are shaded lighter, suggesting lower amounts of damages.
+
+--->Geographical Distribution:
+
+The western and northern parts of France seem to have experienced higher damages compared to the eastern and southern parts.
+
+
+## Discretization of CarAge and DriverAge:
+```{r}
+ # Load necessary libraries
+library(dplyr)
+
+# Discretization of DriverAge into classes
+Dataset <- Dataset %>%
+  mutate(
+    DriverAge_Class = cut(
+      DriverAge,
+      breaks = c(0, 25, 40, 60, Inf),  # Define the intervals
+      labels = c("Young", "Adult", "Senior", "Elderly"),  # Class names in English
+      right = FALSE  # Include the lower bound, exclude the upper bound
+    )
+  )
+
+# Discretization of CarAge into classes
+Dataset <- Dataset %>%
+  mutate(
+    CarAge_Class = cut(
+      CarAge,
+      breaks = c(0, 5, 10, 15, Inf),  # Define the intervals
+      labels = c("New", "Young", "Middle-aged", "Old"),  # Class names in English
+      right = FALSE  # Include the lower bound, exclude the upper bound
+    )
+  )
+
+# Display the dataset with the new discretized variables
+print(Dataset)
+ 
+      
+
+```
+```{r}
+
+# Calculate average claim amount for each Brand and DriverAge
+average_claim <- Dataset %>%
+  group_by(Brand, DriverAge) %>%  # Group by Brand and AgeClass
+  summarise(
+    AverageClaimAmount = mean(ClaimAmount_log, na.rm = TRUE)  # Calculate average claim amount
+  ) %>%
+  ungroup()  # Ungroup to return a regular dataframe
+
+# Display the result
+print(average_claim)
+
+```
+
+
+
+```{r}
+   # Load ggplot2 for visualization
+library(ggplot2)
+
+# Plot for DriverAge classes
+ggplot(Dataset, aes(x = DriverAge_Class)) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Distribution of Driver Age Classes", x = "Driver Age Class", y = "Frequency") +
+  theme_minimal()
+
+# Plot for CarAge classes
+ggplot(Dataset, aes(x = CarAge_Class)) +
+  geom_bar(fill = "orange") +
+  labs(title = "Distribution of Car Age Classes", x = "Car Age Class", y = "Frequency") +
+  theme_minimal()
+```
+Interpretations:
+
+***Distribution of DriverAge Class: ***
+
+--->Observations:
+
+The chart shows the frequency distribution of drivers across four age classes: Young, Adult, Senior, and Elderly.
+
+The highest frequency is observed in the Senior category, followed by the Adult category.
+
+The Elderly category has a moderate frequency, while the Young category has the lowest representation.
+
+--->Insights:
+
+Senior drivers dominate the dataset, indicating that this age group is most represented among drivers.
+
+Young drivers are significantly underrepresented, which could be due to fewer young people having licenses or being involved in driving-related activities.
+
+***Distribution of CarAge Class: ***
+---> New cars have a significantly higher frequency compared to "Young" cars.
+
+##Density by region
+
+```{r}
+#Density by Region
+data <- Dataset %>%
+  group_by(Region) %>%
+  summarise(Total_Density = sum(Density, na.rm = TRUE))
+# Visualisation
+ggplot(data, aes(x = reorder(Region, Total_Density), y = Total_Density, fill = Region)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Density by region",
+       x = "Region",
+       y = "Total Density") +
+  theme_minimal() +
+  theme(
+    axis.title = element_text(size = 14, face = "bold"),
+    legend.position = "none",
+    plot.margin = margin(10, 20, 10, 10)
+  ) +
+  coord_flip()
+```
+Interpretation:
+--->Regions like Île-de-France and Centre-Val de Loire, with high population densities, tend to experience more frequent claims, while areas like Normandy, with lower densities, see fewer claims. This pattern helps explain the observed differences in the number and value of claims.
+
+***TARGET VARIABLE: ClaimAmount_log:***
+
+##Scatter plot of Claim Amount by Driver Age: 
+```{r}
+ggplot(Dataset, aes(x = DriverAge, y = ClaimAmount_log)) +
+  geom_point(size = 3, color = "pink", shape = 16) +  
+  labs(title = "Scatter plot of Claim Amount by Driver Age",
+       x = "Driver Age",
+       y = "Claim Amount") +
+  theme_minimal()
+```
+Interpretation:
+--->Younger drivers may pose a higher risk of costly claims, possibly due to inexperience or riskier driving behavior.
+
+--->Most claims are small in value across all age groups.
+
+##Histogram of Total Claims Amount by Driver Age class:
+```{r}
+data2 <- Dataset %>%
+  group_by(DriverAge_Class) %>%
+  summarise(ClaimAmount = sum(ClaimAmount_log, na.rm = TRUE)) %>%
+  arrange(desc(ClaimAmount))
+# plot the histogram of Total Claims Amount by Driver Age class
+ggplot(data2, aes(x = DriverAge_Class, y = ClaimAmount, fill = DriverAge_Class)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Histogram of Total Claims Amount by Driver Age class",
+       x = "DriverAge_Class",
+       y = "Total Claims Amount") +
+  theme_minimal() +
+ theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10), 
+    axis.title = element_text(size = 14, face = "bold"),
+    legend.position = "none",
+    plot.margin = margin(10, 20, 10, 10)  
+  ) +
+  coord_flip()  
+```
+Interpretation:
+
+--->Senior drivers (likely ages 50–65) have the highest total claim amounts compared to other groups. This may suggest that this group is more active in terms of driving or has higher-value policies.
+
+--->Adult drivers (likely ages 30–50) follow closely behind, with a slightly lower total claim amount than seniors.
+
+---->Young drivers (likely ages 18–30) contribute less to the total claims amount despite their higher likelihood of extreme individual claims (as seen in the scatter plot). This could indicate fewer young drivers in the dataset or lower coverage limits.
+
+--->Elderly drivers (likely ages 65+) have the lowest total claim amounts, possibly due to reduced driving activity or smaller coverage policies.
+
+##Scatter plot of Claim Amount by Car Age: 
+
+```{r}
+ggplot(Dataset, aes(x = CarAge, y = ClaimAmount_log)) +
+  geom_point(size = 3, color = "pink", shape = 16) +  
+  labs(title = "Scatter plot of Claim Amount by Car Age",
+       x = "CarAge",
+       y = "ClaimAmount") +
+  theme_minimal()
+```
+Interpretations:
+---->Most claim amounts are clustered near the bottom of the plot (low claim amounts), similar to the claim amount vs. driver age scatter plot.
+---->There isn't a strong relationship between car age and claim amount. 
+
+##Scatter plot of Claim Amount by Exposure: 
+```{r}
+# Create a scatter plot of Claim Amount by Exposure
+ggplot(Dataset, aes(x = Exposure, y = ClaimAmount_log)) +
+  geom_point(color = "pink", alpha = 0.6) +  
+  labs(title = "Scatter Plot of Claim Amount by Exposure", 
+       x = "Exposure", y = "ClaimAmount ") +  
+  theme_minimal() 
+```
+Interpretations:
+--->Most data points cluster around lower exposure levels (close to 0) and lower claim amounts (close to 0).
+
+--->As exposure increases, claim amounts remain low in most cases, with only a few high-value claims scattered sparsely.
+
+##Scatter plot of Claim Amount by Exposure Across Regions:
+```{r}
+# Create the graphic using the class number:
+ggplot(Dataset, aes(x = Exposure, y = ClaimAmount_log, color = Region)) +
+  geom_point(alpha = 0.6, size = 3) +  
+  geom_smooth(method = "lm", se = FALSE) +  
+  facet_wrap(~ Region, scales = "free") +  
+  labs(
+    title = " Claim Amount by Exposure Across Regions",
+    x = "Exposure",
+    y = "ClaimAmount",
+    color = "Region"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+Interpretations:
+   --->Most regions exhibit similar patterns where claims cluster at lower exposure levels and lower claim amounts.
+
+  --->Some regions (e.g., Aquitaine, Pays-de-la-Loire) show tighter clustering around lower values for both exposure and claim amounts.
+
+  --->Others (e.g., Ile-de-France, Centre) display wider variability in claim amounts at higher exposures 
+  
+  ---->While most regions follow similar trends—low exposure correlating with low claim amounts—there are regional differences in the distribution and frequency of high-value claims. Certain regions may have higher risks associated with larger claims or broader variability in exposure levels.
+  
+##Scatter plot of Claim Amount by Density:
+
+```{r}
+# Scatter plot 
+ggplot(Dataset, aes(x = Density, y = ClaimAmount_log)) +
+  geom_point(size = 3, color = "pink", shape = 16) +  # Points
+  labs(title = "Scatter Plot ",
+       x = "Density",
+       y = "Claim Amount") +
+  theme_minimal()
+```
+Interpretations: 
+---->Smaller claims are much more frequent and are associated with lower density. A few very large claims exist, but they are relatively rare and don't show a clear relationship with density.
+
+##Histogram of total claim amount by Gas:
+```{r}
+ #Calculate the total claim amount by Gas:
+summary_df <- Dataset %>%
+  group_by(Gas) %>%
+  summarise(TotalClaimAmount = sum(ClaimAmount_log, na.rm = TRUE)) %>%
+  arrange(TotalClaimAmount)  
+
+# Convert Gas as factor with sorting
+summary_df$Gas <- factor(summary_df$Gas, levels = summary_df$Gas)
+# plot the histogram
+ggplot(summary_df, aes(x = Gas, y = TotalClaimAmount, fill = Gas)) +
+  geom_bar(stat = "identity") +  
+  labs(title = "Total claim amount by Gas ",
+       x = "Gas",
+       y = "Total claimAmount ") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),  
+    axis.title = element_text(size = 14, face = "bold"),           
+    legend.position = "none",                                      
+    plot.margin = margin(10, 20, 10, 10)                           
+  ) +
+  coord_flip()  
+```
+Interpretations: 
+---> Vehicles using Regular fuel have accumulated slightly higher total claims than Diesel vehicles. 
+
+##Histogram of total claim amount by Power:
+```{r}
+#Calculate the total claim amount by power
+summary_df <- Dataset %>%
+  group_by(Power) %>%
+  summarise(TotalClaimAmount = sum(ClaimAmount_log, na.rm = TRUE)) %>%
+  arrange(TotalClaimAmount)  
+
+# Convert power as factor with sorting
+summary_df$Power <- factor(summary_df$Power, levels = summary_df$Power)
+# plot the histogramm
+ggplot(summary_df, aes(x = Power, y = TotalClaimAmount, fill = Power)) +
+  geom_bar(stat = "identity") +  
+  labs(title = "Total claim amount by Power ",
+       x = "Power",
+       y = "Total ClaimAmount") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),  
+    axis.title = element_text(size = 14, face = "bold"),           
+    legend.position = "none",                                      
+    plot.margin = margin(10, 20, 10, 10)                           
+  ) +
+  coord_flip()  
+```
+Interpretation:
+--->Vehicles with higher power levels (e.g., "f" and "g") tend to have higher total claims, which could be due to factors like:
+     +More expensive vehicles incurring higher repair costs.
+     +Higher accident rates for powerful vehicles.
+     +Greater exposure to risk.
+--->The lower power categories (e.g., "m", "n") contribute less to total claim amounts, possibly indicating fewer claims or lower repair costs
+
+##Histogram of Total Claim Amount by Brand:
+```{r}
+# Calculate the total claim amount by Brand
+summary_df <- Dataset %>%
+  group_by(Brand) %>%
+  summarise(TotalClaimAmount = sum(ClaimAmount_log, na.rm = TRUE)) %>%
+  arrange(TotalClaimAmount)  
+# Convert Brand as factor with sorting
+summary_df$Brand <- factor(summary_df$Brand, levels = summary_df$Brand)
+
+# plot the histogramm
+ggplot(summary_df, aes(x = Brand, y = TotalClaimAmount, fill = Brand)) +
+  geom_bar(stat = "identity") +  
+  labs(title = "Total Claim Amount by Brand",
+       x = "Brand",
+       y = "Total ClaimAmount") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),  
+    axis.title = element_text(size = 14, face = "bold"),           
+    legend.position = "none",                                      
+    plot.margin = margin(10, 20, 10, 10)                           
+  ) +
+  coord_flip()  
+```
+Interpretation:
+--->Renault, Nissan, and Citroën dominate the total claims, which could be due to:
+       +A higher number of insured vehicles from these brands.
+       +A higher claim frequency (more accidents or damages).
+       +Potentially higher repair costs for these vehicles.
+--->Other brands contribute significantly less, possibly due to:
+       +Fewer vehicles insured.
+       +Lower claim frequencies.
+       +Lower average repair costs.
+       
+       
+***ClaimNb**    
+
+
+##Scatter plot of Number of complaints by driver age class with average:
+```{r}
+ggplot(Dataset, aes(x = DriverAge_Class, y = ClaimNb)) +
+  geom_point(size = 3, color = "pink", alpha = 0.6, position = position_jitter(width = 0.2)) +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 5, color = "red") +  
+  labs(title = "Scatter plot of Number of complaints by driver age class with average",
+       x = "DriverAge_Class",
+       y = "Claim number") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+Interpretations:
+--->Observations:
+
+   --->Across all age classes (Young, Adult, Senior, and Elderly), the number of complaints is fairly distributed, with no significant differences between groups.
+
+   --->The red diamond markers represent the average number of complaints for each age class. These averages are very close to zero across all groups.
+
+--->Insights:
+
+  --->The number of complaints does not vary significantly by driver age class, suggesting that complaint frequency is independent of age.
+
+  --->This could indicate that all age groups have similar behaviors when it comes to filing complaints.
+  
+##Scatter plot of Claim number by Car Age: 
+```{r}
+ggplot(Dataset, aes(x = CarAge, y = ClaimNb)) +
+  geom_point(size = 3, color = "pink", shape = 16) +  
+  labs(title = "Scatter plot of Claim Number by Car Age",
+       x = "Car Age",
+       y = "Claim Number") +
+  theme_minimal()
+```
+Interpretations:
+--->For each car age value, there are points at both 0 and 1 on the y-axis.
+--->The scatter plot does not indicate a strong correlation between car age and claim number based on this visualization. 
+
+##Scatter plot of Claim Number by Exposure: 
+```{r}
+# Create a scatter plot of Claim Number by Exposure
+ggplot(Dataset, aes(x = Exposure, y = ClaimNb)) +
+  geom_point(color = "pink", alpha = 0.6) +  
+  labs(title = "Scatter Plot of Claim Number by Exposure", 
+       x = "Exposure", y = "ClaimNb ") +  
+  theme_minimal() 
+```
+Interpretations:
+--->There does not appear to be a clear trend between Exposure and ClaimNb.
+--->Claims (points where ClaimNb = 1) are spread across different Exposure values, with no obvious increase or decrease.
+--->This suggests that Exposure alone might not be a strong predictor of whether a claim occurs.
+
+##Bar plot of Claim Number by Exposure Across Regions:
+```{r}
+# Create the graphic using the class number:
+ggplot(Dataset, aes(x = Exposure, y = ClaimNb, color = Region)) +
+  geom_point(alpha = 0.6, size = 3) +  
+  geom_smooth(method = "lm", se = FALSE) +  
+  facet_wrap(~ Region, scales = "free") +  
+  labs(
+    title = " Claim Number by Exposure Across Regions",
+    x = "Exposure",
+    y = "ClaimNb",
+    color = "Region"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+Interpretations:
+--->Some regions (e.g., Centre, Bretagne, Aquitaine) show more variation in Exposure.
+--->Other regions (e.g., Poitou-Charentes, Haute-Normandie) have narrower Exposure ranges.
+--->The distribution of claims across Exposure is relatively consistent, with no region showing a clear pattern where claims are more frequent at higher or lower Exposure levels.
+
+##Scatter plot of Claim Number by Density:
+```{r}
+# Scatter plot 
+ggplot(Dataset, aes(x = Density, y = ClaimNb)) +
+  geom_point(size = 3, color = "pink", shape = 16) +  # Points
+  labs(title = "Scatter Plot ",
+       x = "Density",
+       y = "Claim Number") +
+  theme_minimal()
+```
+Interpretations:
+----> There doesn't seem to be a clear trend or strong relationship between "Density" and "Claim Number" based on this plot alone. The distribution of points along the x-axis suggests that claims occur across all density levels without a noticeable pattern.
+##Histogram of total claim Number by Power:
+
+```{r}
+#Calculate the total claim Number by power
+summary_df <- Dataset %>%
+  group_by(Power) %>%
+  summarise(TotalClaimNb = sum(ClaimNb, na.rm = TRUE)) %>%
+  arrange(TotalClaimNb)  
+
+# Convert power as factor with sorting
+summary_df$Power <- factor(summary_df$Power, levels = summary_df$Power)
+# plot the histogramm
+ggplot(summary_df, aes(x = Power, y = TotalClaimNb, fill = Power)) +
+  geom_bar(stat = "identity") +  
+  labs(title = "Total claim Number by Power ",
+       x = "Power",
+       y = "Total ClaimNb") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),  
+    axis.title = element_text(size = 14, face = "bold"),           
+    legend.position = "none",                                      
+    plot.margin = margin(10, 20, 10, 10)                           
+  ) +
+  coord_flip()  
+
+```
+Interpretations:
+--->There appears to be a strong relationship between vehicle power and the total number of claims.
+
+--->Higher-powered vehicles (e.g., "f" and "g") are associated with more claims, potentially due to factors like increased risk-taking or higher usage.
+
+--->Lower-powered vehicles (e.g., "n" and "o") have fewer claims, possibly due to less frequent use or lower speeds*
+
+##Histogram of total claim Number by Gas:
+```{r}
+ #Calculate the total claim Number by Gas:
+summary_df <- Dataset %>%
+  group_by(Gas) %>%
+  summarise(TotalClaimNb = sum(ClaimNb, na.rm = TRUE)) %>%
+  arrange(TotalClaimNb)  
+
+# Convert Gas as factor with sorting
+summary_df$Gas <- factor(summary_df$Gas, levels = summary_df$Gas)
+# plot the histogram
+ggplot(summary_df, aes(x = Gas, y = TotalClaimNb, fill = Gas)) +
+  geom_bar(stat = "identity") +  
+  labs(title = "Total claim Number by Gas ",
+       x = "Gas",
+       y = "Total ClaimNb ") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),  
+    axis.title = element_text(size = 14, face = "bold"),           
+    legend.position = "none",                                      
+    plot.margin = margin(10, 20, 10, 10)                           
+  ) +
+  coord_flip() 
+```
+Interpretations:
+--->Vehicles using diesel fuel are associated with more claims than those using regular gasoline.
+
+##Histogram of Total Claim Number by Brand:
+```{r}
+# Calculate the total claim Number by Brand
+summary_df <- Dataset %>%
+  group_by(Brand) %>%
+  summarise(TotalClaimNb = sum(ClaimNb, na.rm = TRUE)) %>%
+  arrange(TotalClaimNb)  
+# Convert Brand as factor with sorting
+summary_df$Brand <- factor(summary_df$Brand, levels = summary_df$Brand)
+
+# plot the histogramm
+ggplot(summary_df, aes(x = Brand, y = TotalClaimNb, fill = Brand)) +
+  geom_bar(stat = "identity") +  
+  labs(title = "Total Claim Number by Brand",
+       x = "Brand",
+       y = "Total ClaimNb") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),  
+    axis.title = element_text(size = 14, face = "bold"),           
+    legend.position = "none",                                      
+    plot.margin = margin(10, 20, 10, 10)                           
+  ) +
+  coord_flip()  
+```
+Interpretations:
+
+--->Observations:
+
+    --->"Renault, Nissan, or Citroen" has the highest total claim number.
+
+    --->There's a clear ranking of brands by claim number.
+    
+--->Interpretation:
+
+   --->The brand of the unit seems to be related to the total number of claims. Some brands are associated with more claims than others.
+
+
+```{r}
+print(Dataset)
+```
+
+## Anova for categorical variables:
+
+**Target Variable: ClaimAmount_log**
+```{r}
+# Categorical variables:
+categorical_vars <- c("Brand", "Region", "Power", "Gas", "CarAge_Class", "DriverAge_Class")
+
+# Loop for ANOVA 
+for (var in categorical_vars) {
+  # Create formula dynamically using as.formula()
+  formula <- as.formula(paste("ClaimAmount_log ~", var))
+  
+  # Run ANOVA
+  anova_result <- aov(formula, data = Dataset)
+  
+  # Print variable name and ANOVA summary
+  cat("\n\n===== ANOVA for", var, "=====\n")
+  print(summary(anova_result))
+  
+}
+```
+Interpretations:
+   **Anova test for Brand:** -->Since p-value <2e-16 (significance level ‘*’**), there is a statistically significant difference in Claim Amount between different brands.
+   **Anova test for Region:** -->p-value: <2e-16, which is highly significant
+   --->There is a statistically significant difference between regions, though the effect is weaker than for Brand.
+ **Anova test for Power:**  -->p-value (Pr(>F)): 9.56e-12, which is highly significant, indicating a strong effect of Power on the Claim Amount.
+ **Anova test for Gas:** -->p-value (Pr(>F)): 5.44e-10, which is highly significant, indicating that Gas has a strong effect on Claim Amount.
+ **Anova test for CarAge_Class:** ---> p-value (Pr(>F)): < 2e-16, which is highly significant (***), indicating that CarAge_Class has a strong effect on Claim Number
+ **Anova test for DriverAge_Class:** p-value (Pr(>F)): < 2e-16, highly significant, indicating that DriverAge_Class has a very strong effect on Claim Amount
+
+**Target Variable: ClaimNb**
+
+```{r}
+# Categorical variables:
+categorical_vars <- c("Brand", "Region", "Power", "Gas", "CarAge_Class", "DriverAge_Class")
+
+# Loop for ANOVA 
+for (var in categorical_vars) {
+  # Create formula dynamically using as.formula()
+  formula <- as.formula(paste("ClaimNb ~", var))
+  
+  # Run ANOVA
+  anova_result <- aov(formula, data = Dataset)
+  
+  # Print variable name and ANOVA summary
+  cat("\n\n===== ANOVA for", var, "=====\n")
+  print(summary(anova_result))
+  
+ }
+```
+Interpretations:
+   **Anova test for Brand:** -->Since p-value <2e-16 (significance level ‘*’**), there is a statistically significant difference in the response variable between different brands.
+   **Anova test for Region:** -->p-value: <2e-16, which is highly significant
+   --->There is a statistically significant difference between regions, though the effect is weaker than for Brand.
+ **Anova test for Power:**  -->p-value (Pr(>F)): 4.84e-12, which is highly significant, indicating a strong effect of Power on the Claim Number
+ **Anova test for Gas:** -->p-value (Pr(>F)): 1.23e-09, which is highly significant, indicating that Gas has a strong effect on Claim Number
+ **Anova test for CarAge_Class:** ---> p-value (Pr(>F)): < 2e-16, which is highly significant (***), indicating that CarAge_Class has a strong effect on Claim Number
+ **Anova test for DriverAge_Class:** p-value (Pr(>F)): < 2e-16, highly significant, indicating that DriverAge_Class has a very strong effect on Claim Number.
+  
+## Independance between categorical variables:
+
+```{r}
+# Define categorical columns
+categorical_cols <- c("Power", "Brand", "Region", "Gas")
+
+# Ensure that categorical columns are properly converted to factors
+for (var in categorical_cols) {
+  Dataset[[var]] <- as.character(Dataset[[var]])  # Convert to character first (handles list issues)
+    Dataset[[var]] <- as.factor(Dataset[[var]])     # Convert to factor
+}
+
+# Perform Chi-square test for each pair of categorical variables
+for (i in 1:(length(categorical_cols) - 1)) {
+  for (j in (i + 1):length(categorical_cols)) {
+    
+    # Create a contingency table
+    table_contingence <- table(Dataset[[categorical_cols[i]]], Dataset[[categorical_cols[j]]])
+    
+    # Perform Chi-square test (check for zero counts to avoid errors)
+    if (all(table_contingence > 0)) {  # Ensure no zero counts in contingency table
+      test_chi2 <- chisq.test(table_contingence)
+      
+      # Display results
+      cat("Chi-square test for", categorical_cols[i], "and", categorical_cols[j], "\n")
+      print(test_chi2)
+      cat("\n")
+    } else {
+      cat("Skipping Chi-square test for", categorical_cols[i], "and", categorical_cols[j], 
+          "due to zero counts in contingency table.\n\n")
+    }
+  }
+}
+
+
+
+```
+Interpretations: 
+
+All p-values are < 2.2e-16 (essentially 0)
+
+This means all variable pairs have a significant association at any reasonable significance level (e.g., 0.05 or 0.01).
+
+**Statistical significance (small p-value) does not tell us how strong the relationship is. To quantify this, use Cramér’s V, which measures the association between two categorical variables.**
+
+
+***Cramér’s V***
+
+
+```{r}
+library(vcd)  # Load the necessary package
+
+# Function to compute Cramér's V for each pair
+compute_cramers_v <- function(var1, var2, data) {
+  table_contingency <- table(data[[var1]], data[[var2]])
+  cramers_v <- assocstats(table_contingency)$cramer
+  return(cramers_v)
+}
+
+# Apply to all categorical pairs
+for (i in 1:(length(categorical_cols) - 1)) {
+  for (j in (i + 1):length(categorical_cols)) {
+    v_value <- compute_cramers_v(categorical_cols[i], categorical_cols[j], Dataset)
+    cat("Cramér's V for", categorical_cols[i], "and", categorical_cols[j], ":", round(v_value, 3), "\n")
+  }
+}
+
+```
+ Interpretation :
+--->Power & Brand (0.192):
+
+    Weak to moderate association. Power and Brand are somewhat related but not strongly dependent.
+
+--->Power & Region (0.057):
+
+    Very weak association. Power usage/type does not strongly vary across regions.
+
+--->Power & Gas (0.332):
+
+    Relatively strong association. Power and Gas usage/type are more related compared to other pairs.
+
+--->Brand & Region (0.187):
+
+    Weak association. The Brand of the product may have some influence based on the Region but not strongly.
+
+--->Brand & Gas (0.100):
+
+    Weak association. Brand and Gas usage/type are not strongly linked.
+
+--->Region & Gas (0.101):
+
+   Weak association. Gas usage does not vary significantly by Region.
+
+**Conclusion**
+*If two variables have a high Cramér’s V (typically > 0.3 or 0.4), they are strongly associated.
+
+*High association means they might cause multicollinearity in a GLM, leading to unstable coefficient estimates.
+
+--->Action: Power & Gas (0.332) → We keep one of them.
+ 
+ 
+##Conclusion:
+ **Claim_Amount_log**: ClaimAmount is primarily influenced by driver age, with higher claim amounts for younger drivers, but is not significantly influenced by Car Age and Density. Brand, Region and power has also a significant influence on our variable ClaimAmount.
+ 
+ **ClaimNb** The scatter plot does not indicate a strong correlation between car age and claim number based on this visualization , also for the scatter plot of Density and Claim Number. so, we can consider that Claim Number is not influenced by Density, Exposure and CarAge. Indeed, ClaimNb is influenced significantly by DriverAge, Brand, Region and Power.
+ 
+ 
+##Goodness-of-fit tests
+
+## ClaimAmount
+
+### Distribution adjustment
+
+```{r}
+# Verify the null values  
+cat("Number of null values")
+sum(Dataset$ClaimAmount == 0)
+cat("\ Distributions like Lognormal, Gamma, and Weibull are defined for strictly positive values. To work around this problem, values less than or equal to zero are replaced with a small positive value (1e-6).")
+
+# Replace the null values by negligible positive values 
+Dataset$ClaimAmount[Dataset$ClaimAmount <= 0] <- 1e-6
+# get unique values
+  unique_claims <- unique(Dataset$ClaimAmount)
+
+# Adjustment of the distrubution
+library(fitdistrplus)
+fit_gamma <- fitdist(Dataset$ClaimAmount, "gamma")
+fit_lnorm <- fitdist(Dataset$ClaimAmount, "lnorm")
+fit_weibull <- fitdist(Dataset$ClaimAmount, "weibull")
+```
+### Kolmogorov-Smirnov test
+
+```{r}
+library(MASS)
+# Ensure ClaimAmount is positive (required for these distributions)
+clean_claims <- Dataset$ClaimAmount[Dataset$ClaimAmount > 0]
+# Kolmogorov-Smirnov tests
+ks_gamma <- ks.test(clean_claims, "pgamma", 
+                   shape = fit_gamma$estimate["shape"], 
+                   rate = fit_gamma$estimate["rate"])
+
+ks_lnorm <- ks.test(clean_claims, "plnorm", 
+                   meanlog = fit_lnorm$estimate["meanlog"], 
+                   sdlog = fit_lnorm$estimate["sdlog"])
+
+ks_weibull <- ks.test(clean_claims, "pweibull", 
+                     shape = fit_weibull$estimate["shape"], 
+                     scale = fit_weibull$estimate["scale"])
+# Print results
+cat("Kolmogorov-Smirnov test for Gamma distribution:\n")
+print(ks_gamma)
+
+cat("\nKolmogorov-Smirnov test for Lognormal distribution:\n")
+print(ks_lnorm)
+
+cat("\nKolmogorov-Smirnov test for Weibull distribution:\n")
+print(ks_weibull)
+
+# Determine best fit based on K-S statistic (lower is better)
+ks_stats <- c(Gamma = ks_gamma$statistic, 
+              Lognormal = ks_lnorm$statistic, 
+              Weibull = ks_weibull$statistic)
+              
+cat("\nK-S statistic values (lower is better):\n")
+print(ks_stats)
+cat("\nBest fitting distribution based on K-S statistic:", 
+    names(ks_stats)[which.min(ks_stats)], "\n")
+```
+Interpretations:
+---> The Weibull distribution is the best-fitting distribution based on the Kolmogorov-Smirnov test since it has the lowest D-statistic (0.49415).
+
+###Cramér-von Mises test
+```{r}
+# Load required package
+library(goftest)
+
+# Cramér-von Mises tests
+
+# For gamma distribution
+cvm_gamma <- cvm.test(clean_claims, "pgamma", 
+                     shape = fit_gamma$estimate["shape"], 
+                     rate = fit_gamma$estimate["rate"])
+
+# For lognormal distribution
+cvm_lnorm <- cvm.test(clean_claims, "plnorm", 
+                     meanlog = fit_lnorm$estimate["meanlog"], 
+                     sdlog = fit_lnorm$estimate["sdlog"])
+
+# For Weibull distribution
+cvm_weibull <- cvm.test(clean_claims, "pweibull", 
+                       shape = fit_weibull$estimate["shape"], 
+                       scale = fit_weibull$estimate["scale"])
+
+# Print results
+cat("Cramér-von Mises test for Gamma distribution:\n")
+print(cvm_gamma)
+
+cat("\nCramér-von Mises test for Lognormal distribution:\n")
+print(cvm_lnorm)
+
+cat("\nCramér-von Mises test for Weibull distribution:\n")
+print(cvm_weibull)
+
+# Determine best fit based on test statistic (lower is better)
+cvm_stats <- c(Gamma = cvm_gamma$statistic, 
+               Lognormal = cvm_lnorm$statistic, 
+               Weibull = cvm_weibull$statistic)
+               
+cat("\nCramér-von Mises statistic values (lower is better):\n")
+print(cvm_stats)
+cat("\nBest fitting distribution based on Cramér-von Mises statistic:", 
+    names(cvm_stats)[which.min(cvm_stats)], "\n")
+```
+Interpretations:
+---> The Weibull distribution is the best-fitting distribution based on the Cramér-von Mises test since it has the lowest omega2-statistic (30796.72 ).
+
+### Anderson-Darling Test:
+
+```{r}
+# Load required package
+library(ADGofTest)  # For Anderson-Darling test
+library(fitdistrplus)  # For fitting distributions
+
+# Define distribution functions with estimated parameters
+pgamma_fitted <- function(x) {
+  pgamma(x, shape = fit_gamma$estimate["shape"], 
+         rate = fit_gamma$estimate["rate"])
+}
+
+plnorm_fitted <- function(x) {
+  plnorm(x, meanlog = fit_lnorm$estimate["meanlog"], 
+         sdlog = fit_lnorm$estimate["sdlog"])
+}
+
+pweibull_fitted <- function(x) {
+  pweibull(x, shape = fit_weibull$estimate["shape"], 
+           scale = fit_weibull$estimate["scale"])
+}
+
+# Anderson-Darling tests
+ad_gamma <- ad.test(clean_claims, pgamma_fitted)
+ad_lnorm <- ad.test(clean_claims, plnorm_fitted)
+ad_weibull <- ad.test(clean_claims, pweibull_fitted)
+
+# Print results
+cat("Anderson-Darling test for Gamma distribution:\n")
+print(ad_gamma)
+
+cat("\nAnderson-Darling test for Lognormal distribution:\n")
+print(ad_lnorm)
+
+cat("\nAnderson-Darling test for Weibull distribution:\n")
+print(ad_weibull)
+
+# Determine best fit based on test statistic (lower is better)
+ad_stats <- c(Gamma = ad_gamma$statistic, 
+              Lognormal = ad_lnorm$statistic, 
+              Weibull = ad_weibull$statistic)
+              
+cat("\nAnderson-Darling statistic values (lower is better):\n")
+print(ad_stats)
+cat("\nBest fitting distribution based on Anderson-Darling statistic:", 
+    names(ad_stats)[which.min(ad_stats)], "\n")
+```
+
+Interpretations:
+---> The Weibull distribution is the best-fitting distribution based on the Anderson-Darling  test since it has the lowest AD-statistic (143567.3).
+
+**Conclusion:** After testing several distributions, we choose the Weibull distribution.
+
+## ClaimNb:
+
+### khi-deux test:
+
+```{r}
+# Load required libraries
+library(fitdistrplus)
+library(kableExtra)
+
+# Fit a Poisson distribution to ClaimNb
+fit_poisson <- fitdist(Dataset$ClaimNb, "pois")
+# Fit a negative binomial distribution to ClaimNb
+fit_nbinom <- fitdist(Dataset$ClaimNb, "nbinom")
+
+# Extract the estimated parameters
+lambda <- fit_poisson$estimate["lambda"]  
+size <- fit_nbinom$estimate["size"]       
+mu <- fit_nbinom$estimate["mu"]          
+
+# Calculate the observed frequencies
+observed <- table(Dataset$ClaimNb)
+
+# Function to calculate expected frequencies
+calculate_expected <- function(observed, dist, ...) {
+  values <- as.numeric(names(observed))  
+  probs <- dist(values, ...)            
+  expected <- probs * length(Dataset$ClaimNb) 
+  return(expected)
+}
+
+# Expected frequencies under Poisson
+expected_poisson <- calculate_expected(observed, dpois, lambda = lambda)
+# Expected frequencies under the negative binomial
+expected_nbinom <- calculate_expected(observed, dnbinom, size = size, mu = mu)
+
+# Apply the Chi-square test for Poisson
+chisq_poisson <- chisq.test(observed, p = expected_poisson / sum(expected_poisson))
+# Apply the Chi-square test for the negative binomial
+chisq_nbinom <- chisq.test(observed, p = expected_nbinom / sum(expected_nbinom))
+
+# Create a table to organize the results
+resultats <- data.frame(
+  test = c("Poisson", "Negative binomial"),
+  Chi2_statistique = c(chisq_poisson$statistic, chisq_nbinom$statistic),
+  P_value = c(chisq_poisson$p.value, chisq_nbinom$p.value)
+)
+
+# Displaying the results table
+kable(resultats, 
+      caption = "Chi-square test results", 
+      col.names = c("Distribution", "Chi-Square Statistic", "P-value")) %>%
+  kable_classic(full_width = FALSE, html_font = "Cambria")
+
+```
+Interpretations:
+--->Both of the distributions are very small (< 0.05) → Strong evidence against the null hypothesis.
+
+--->This suggests that neither the Poisson nor Negative Binomial model perfectly fits the data.
+
+
+#Calculation of comparison criteria
+```{r}
+# Create comparison table
+comparison_table <- data.frame(
+  Distribution = c("Poisson", "Negative Binomial"),
+  AIC = c(fit_poisson$aic, fit_nbinom$aic),
+  BIC = c(fit_poisson$bic, fit_nbinom$bic)
+)
+
+# Print comparison table
+print(comparison_table)
+
+# Identify the best distribution
+best_distribution <- comparison_table[which.min(comparison_table$AIC), "Distribution"]
+cat("\nBest Distribution by AIC:", best_distribution, "\n")
+
+best_distribution_bic <- comparison_table[which.min(comparison_table$BIC), "Distribution"]
+cat("Best Distribution by BIC:", best_distribution_bic, "\n")
+
+# Additional interpretation
+cat("\nInterpretation:\n")
+cat("- Lower AIC/BIC values indicate a better fit\n")
+cat("- A difference of >2 in AIC/BIC is considered significant\n")
+```
+
+
+
+##Glm:
+
+  **Average cost model **
+  
+##Calculating average cost:
+```{r}
+# Check that ClaimNb != 0 and ClaimAmount != 0 before calculating
+Dataset$ClaimAmountMoyen <- ifelse(Dataset$ClaimNb != 0 & Dataset$ClaimAmount != 0,Dataset$ClaimAmount / Dataset$ClaimNb,1e-6)
+```
+
+
+##Split the Data into Training and Test Sets
+```{r}
+# Create an index to divide the data
+# Exclude CarAge, Density, and ClaimNb from Dataset
+
+train_index <- sample(1:nrow(Dataset), 0.7 * nrow(Dataset))
+
+# Split the data
+train_data <- Dataset[train_index, ]  # 70% for training
+test_data <- Dataset[-train_index, ]  # 30% for testing 
+
+# Check the dimensions of the sets
+print(paste("Training set size :", nrow(train_data)))
+print(paste("Test set size :", nrow(test_data)))
+```
+```{r}
+print(Dataset)
+```
+
+
+##Fit the GLM Model on the Training Set
+
+
+```{r}
+# First, load necessary libraries
+library(fitdistrplus)  # For distribution fitting
+library(MASS)  # For glm.nb function
+library(survival)  # For Weibull regression
+
+# Confirm we're working with the training data
+dim(train_data)
+
+# 1. Fit Weibull distribution to ClaimAmountMoyen
+# Ensure data is positive
+pos_claims <- train_data$ClaimAmountMoyen[train_data$ClaimAmountMoyen > 0]
+weibull_fit <- fitdist(pos_claims, "weibull")
+print(weibull_fit)
+
+# 2. Convert categorical variables to factors if not already
+train_data$Brand <- as.factor(train_data$Brand)
+train_data$Region <- as.factor(train_data$Region)
+train_data$Power <- as.factor(train_data$Power)
+
+# 3. Prepare for Weibull GLM
+# For Weibull regression, we need to use survreg from the survival package
+# First create a Surv object for the response
+surv_obj <- Surv(time = train_data$ClaimAmountMoyen, event = rep(1, nrow(train_data)))
+
+# 4. Fit the Weibull GLM model with offset
+weibull_model <- survreg(
+  surv_obj ~ Brand + Region + Power + DriverAge + offset(log(Exposure)),
+  data = train_data,
+  dist = "weibull"
+)
+
+# 5. Summarize the model
+summary(weibull_model)
+
+# 6. Interpret coefficients
+# In survreg, positive coefficients indicate increased survival time
+# (which means lower hazard/risk)
+coef_table <- summary(weibull_model)$table
+print(coef_table)
+
+# 7. Predict on test data
+test_data$predicted <- predict(weibull_model, newdata = test_data, type = "response")
+```
+
+
+
+# Evaluate model performance: 
+
+# For claims data, we often use measures like Mean Absolute Error (MAE)
+#Akaike Information Criterion(AIC )
+# Mean Absolute Percentage Error(MAPE)
+# and Root Mean Squared Error (RMSE)
+```{r}
+actual <- test_data$ClaimAmountMoyen
+predicted <- test_data$predicted
+aic <- AIC(weibull_model)
+mae <- mean(abs(actual - predicted), na.rm = TRUE)
+rmse <- sqrt(mean((actual - predicted)^2, na.rm = TRUE))
+mape <- mean(abs((actual - predicted)/actual), na.rm = TRUE) * 100  # percentage error
+
+cat("\nModel Evaluation Metrics:\n")
+cat("AIC:", aic, "\n")
+cat("MAE:", mae, "\n")
+cat("RMSE:", rmse, "\n")
+cat("MAPE:", mape, "%\n")
+```
+# Calculate Gini index for model evaluation
+```{r}
+# Calculate Gini index for model evaluation
+# This function returns the Gini coefficient based on actual vs predicted values
+calculate_gini <- function(actual, predicted) {
+  # Sort the data based on predictions
+  ord <- order(predicted, decreasing = TRUE)
+  actual_sorted <- actual[ord]
+  
+  # Calculate cumulative values
+  cum_actual <- cumsum(actual_sorted)
+  cum_actual <- cum_actual / max(cum_actual)
+  
+  # Calculate area under Lorenz curve
+  n <- length(actual)
+  index <- 1:n / n
+  auc <- sum((cum_actual[-1] + cum_actual[-n]) / 2 * diff(index))
+  
+  # Calculate Gini coefficient
+  gini <- 2 * auc - 1
+  
+  return(gini)
+}
+
+# Apply to your test data
+# For claims frequency models, we need actual vs predicted frequencies
+test_data$actual_frequency <- test_data$ClaimNb / test_data$Exposure
+test_data$predicted_frequency <- test_data$predicted / test_data$Exposure
+
+# Calculate Gini index
+gini_score <- calculate_gini(test_data$actual_frequency, test_data$predicted_frequency)
+print(paste("Gini coefficient:", round(gini_score, 4)))
+
+# For visualization, you can also plot the Lorenz curve
+plot_lorenz_curve <- function(actual, predicted) {
+  # Sort the data
+  ord <- order(predicted, decreasing = TRUE)
+  actual_sorted <- actual[ord]
+  
+  # Calculate cumulative values
+  cum_actual <- cumsum(actual_sorted)
+  cum_actual <- cum_actual / max(cum_actual)
+  
+  # Calculate diagonal line (perfect equality)
+  n <- length(actual)
+  index <- 0:n / n
+  
+  # Plot
+  plot(c(0, index[-1]), c(0, cum_actual), 
+       type = "l", col = "blue", lwd = 2,
+       xlab = "Cumulative % of policies", 
+       ylab = "Cumulative % of claims",
+       main = "Lorenz Curve")
+  lines(c(0,1), c(0,1), col = "red", lty = 2, lwd = 2)
+  legend("topleft", legend = c("Model", "Random"),
+         col = c("blue", "red"), lty = c(1, 2), lwd = 2)
+  
+  # Add Gini value to plot
+  gini <- 2 * (sum((cum_actual[-1] + cum_actual[-n]) / 2 * diff(index[-1]))) - 1
+  text(0.7, 0.3, paste("Gini =", round(gini, 4)), cex = 1.2)
+}
+
+# Plot the Lorenz curve
+plot_lorenz_curve(test_data$actual_frequency, test_data$predicted_frequency)
+```
+Interpretation:
+--->A Gini of 0.3444 indicates a moderate predictive power — the model is better than random, but not exceptionally strong.
+
+#Fit the second GLM Model on the Training Set
+```{r}
+
+# 1. Fit Lognormal distribution to ClaimAmount
+# Ensure data is positive
+pos_claims <- train_data$ClaimAmountMoyen[train_data$ClaimAmountMoyen > 0]
+lnorm_fit <- fitdist(pos_claims, "lnorm")
+print(lnorm_fit)
+
+# 2. Convert categorical variables to factors if not already
+train_data$Brand <- as.factor(train_data$Brand)
+train_data$Region <- as.factor(train_data$Region)
+train_data$Power <- as.factor(train_data$Power)
+
+# 3. Prepare for lognormal GLM
+
+# For lognormal regression, we need to use survreg from the survival package
+
+# First create a Surv object for the response
+
+surv_obj <- Surv(time = train_data$ClaimAmountMoyen, event = rep(1, nrow(train_data)))
+
+# 4. Fit the lognormal GLM model with offset
+lognormal_model <- survreg(
+  surv_obj ~ Brand + Region + Power + DriverAge + offset(log(Exposure)),
+  data = train_data,
+  dist = "lognormal"
+)
+
+# 5. Summarize the model
+summary(lognormal_model)
+
+# 6. Interpret coefficients
+# In survreg, positive coefficients indicate increased survival time
+# (which means lower hazard/risk)
+coef_table <- summary(lognormal_model)$table
+print(coef_table)
+
+# 7. Predict on test data
+test_data$predicted <- predict(lognormal_model, newdata = test_data, type = "response")
+```
+
+# Evaluate model performance:
+```{r}
+actual <- test_data$ClaimAmountMoyen
+predicted <- test_data$predicted
+
+aic <- AIC(lognormal_model)
+mae <- mean(abs(actual - predicted), na.rm = TRUE)
+rmse <- sqrt(mean((actual - predicted)^2, na.rm = TRUE))
+mape <- mean(abs((actual - predicted)/actual), na.rm = TRUE) * 100  # percentage error
+
+cat("\nLognormal Model Evaluation Metrics:\n")
+cat("AIC:", aic, "\n")
+cat("MAE:", mae, "\n")
+cat("RMSE:", rmse, "\n")
+cat("MAPE:", mape, "%\n")
+```
+# Calculate Gini index for lognormal model evaluation
+
+```{r}
+# Calculate Gini index for lognormal model evaluation
+calculate_gini <- function(actual, predicted) {
+  # Sort the data based on predictions
+  ord <- order(predicted, decreasing = TRUE)
+  actual_sorted <- actual[ord]
+  
+  # Calculate cumulative values
+  cum_actual <- cumsum(actual_sorted)
+  cum_actual <- cum_actual / max(cum_actual)
+  
+  # Calculate area under Lorenz curve
+  n <- length(actual)
+  index <- 1:n / n
+  auc <- sum((cum_actual[-1] + cum_actual[-n]) / 2 * diff(index))
+  
+  # Calculate Gini coefficient
+  gini <- 2 * auc - 1
+  
+  return(gini)
+}
+
+# Apply to your test data
+# For severity models, we need actual vs predicted claim amounts
+test_data$actual_severity <- test_data$ClaimAmountMoyen
+test_data$predicted_severity <- test_data$predicted
+
+# Calculate Gini index for the lognormal model
+lognormal_gini <- calculate_gini(test_data$actual_severity, test_data$predicted_severity)
+print(paste("Lognormal model Gini coefficient:", round(lognormal_gini, 4)))
+
+# For visualization, create the Lorenz curve
+plot_lorenz_curve <- function(actual, predicted) {
+  # Sort the data
+  ord <- order(predicted, decreasing = TRUE)
+  actual_sorted <- actual[ord]
+  
+  # Calculate cumulative values
+  cum_actual <- cumsum(actual_sorted)
+  cum_actual <- cum_actual / max(cum_actual)
+  
+  # Calculate diagonal line (perfect equality)
+  n <- length(actual)
+  index <- 0:n / n
+  
+  # Plot
+  plot(c(0, index[-1]), c(0, cum_actual), 
+       type = "l", col = "blue", lwd = 2,
+       xlab = "Cumulative % of policies", 
+       ylab = "Cumulative % of claim amount",
+       main = "Lorenz Curve - Lognormal Model")
+  lines(c(0,1), c(0,1), col = "red", lty = 2, lwd = 2)
+  legend("topleft", legend = c("Lognormal Model", "Random"),
+         col = c("blue", "red"), lty = c(1, 2), lwd = 2)
+  
+  # Add Gini value to plot
+  gini <- 2 * (sum((cum_actual[-1] + cum_actual[-n]) / 2 * diff(index[-1]))) - 1
+  text(0.7, 0.3, paste("Gini =", round(gini, 4)), cex = 1.2)
+}
+
+# Plot the Lorenz curve for the lognormal model
+plot_lorenz_curve(test_data$actual_severity, test_data$predicted_severity)
+```
+Interpretation:
+
+--->The blue line is very close to the red dashed line.
+
+--->This means the model is barely better than random at ranking policies by risk (claim amount).
+
+
+---->Gini coefficient of 0.0264 is very low.
+
+--->A Gini close to 0 means the model has almost no discriminatory power.
+
+#Fit the third GLM Model on the Training Set
+
+```{r}
+# First load the required package
+library(statmod)  # This package provides the tweedie family
+
+# Corrected function with explicit namespace reference
+power_range = seq(1.1, 1.9, by = 0.1)
+find_best_tweedie_power <- function(train_data, response_var) {
+  deviances <- numeric(length(power_range))
+  
+  for (i in seq_along(power_range)) {
+    formula <- as.formula(paste(response_var, "~ ."))
+    
+    # Use explicit namespace reference to statmod package
+    model <- glm(formula, 
+                data = train_data, 
+                family = statmod::tweedie(var.power = power_range[i], link.power = 0))
+    
+    deviances[i] <- model$deviance
+  }
+  # Plot deviance vs power parameter
+  plot(power_range, deviances, type = "l", 
+       xlab = "Power Parameter", ylab = "Deviance",
+       main = "Deviance vs Power Parameter for Tweedie Distribution")
+  
+  best_power <- power_range[which.min(deviances)]
+  abline(v = best_power, col = "red")
+  print(paste("Best power parameter:", best_power))
+  return(best_power)
+}
+
+# Find the optimal power paramete
+best_power <- find_best_tweedie_power(train_data, "ClaimAmount")
+
+cat("Best power parameter for Tweedie distribution:", best_power, "\n")
+
+# Build the Tweedie GLM model on training data
+# Assuming you want to use all variables as predictors
+# You can modify the formula as needed
+tweedie_model <- glm(ClaimAmount ~ ., 
+                    data = train_data, 
+                    family = tweedie(var.power = best_power, link.power = 0))
+
+# Display model summary
+summary(tweedie_model)
+
+# Check model diagnostics
+par(mar = c(4, 4, 2, 2))
+plot(tweedie_model)
+
+
+```
+Interpretations:
+--->The model is not capturing the true relationship for many observations, especially for large fitted values. The presence of strong outliers (labelled points) suggests the model is not handling extreme claims well.
+--->The residuals are not normally distributed. There are extreme positive outliers, indicating the model underestimates some very large claims.
+--->The model’s error variance is not constant.
+
+# Evaluate the model on test data
+```{r}
+predictions <- predict(tweedie_model, newdata = test_data, type = "response")
+```
+
+# Calculate evaluation metrics
+
+```{r}
+# For insurance claims, we often use metrics like RMSE, MAE, and MAPE
+
+# Root Mean Squared Error (RMSE)
+rmse <- sqrt(mean((test_data$ClaimAmount - predictions)^2))
+
+# Mean Absolute Error (MAE)
+mae <- mean(abs(test_data$ClaimAmount - predictions))
+
+# Mean Absolute Percentage Error (MAPE)
+# We add a small constant to avoid division by zero
+mape <- mean(abs((test_data$ClaimAmount - predictions) / 
+                 (test_data$ClaimAmount + 0.01))) * 100
+
+# Print evaluation metrics
+cat("Model Evaluation on Test Data:\n")
+cat("RMSE:", rmse, "\n")
+cat("MAE:", mae, "\n")
+cat("MAPE:", mape, "%\n")
+
+# Visualize actual vs predicted values
+results_df <- data.frame(
+  Actual = test_data$ClaimAmount,
+  Predicted = predictions
+)
+
+# Create scatter plot
+ggplot(results_df, aes(x = Actual, y = Predicted)) +
+  geom_point(alpha = 0.5, color = "blue") +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(title = "Actual vs Predicted Claim Amounts",
+       x = "Actual Claim Amount",
+       y = "Predicted Claim Amount") +
+  theme_minimal() +
+  # Add a smoothed line to see the pattern
+  geom_smooth(method = "loess", color = "green", se = FALSE) +
+  # Limit axes to focus on majority of data points (adjust as needed)
+  coord_cartesian(xlim = c(0, quantile(results_df$Actual, 0.95)),
+                 ylim = c(0, quantile(results_df$Predicted, 0.95)))
+
+# Feature importance analysis
+# Extract coefficients and create a coefficient plot
+coef_df <- data.frame(
+  Feature = names(coef(tweedie_model))[-1],  # Excluding intercept
+  Coefficient = coef(tweedie_model)[-1]
+)
+coef_df <- coef_df[order(abs(coef_df$Coefficient), decreasing = TRUE), ]
+
+# Plot feature importance
+ggplot(coef_df, aes(x = reorder(Feature, abs(Coefficient)), y = Coefficient)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Feature Importance in Tweedie GLM",
+       x = "Feature",
+       y = "Coefficient Value") +
+  theme_minimal()
+```
+Interpretation:
+
+--->The points are very close to the origin, and there is only one visible point far from zero.
+--->This suggests that for almost all cases, both the actual and predicted claim amounts are extremely small (close to zero).
+--->The model is not capturing the rare, large claims—almost all predictions are near zero, matching the highly imbalanced nature of your data.
+--->The model is not able to distinguish high-claim cases from low-claim cases.
+
+# Gini index
+
+```{r}
+# Function to calculate Gini index
+calculate_gini <- function(actual, predicted) {
+  # Sort the data by predicted values in descending order
+  ord <- order(predicted, decreasing = TRUE)
+  actual_sorted <- actual[ord]
+  
+  # Calculate cumulative sums
+  cum_actual <- cumsum(actual_sorted)
+  cum_actual_pct <- cum_actual / sum(actual_sorted)
+  
+  # Calculate perfect model (sort actual values in descending order)
+  perfect_ord <- order(actual, decreasing = TRUE)
+  perfect_actual <- actual[perfect_ord]
+  perfect_cum <- cumsum(perfect_actual)
+  perfect_cum_pct <- perfect_cum / sum(perfect_actual)
+  
+  # Calculate random model (proportional distribution)
+  n <- length(actual)
+  random_cum_pct <- (1:n) / n
+  
+  # Calculate areas
+  model_area <- sum(cum_actual_pct) / n
+  random_area <- 0.5  # Area under the diagonal line
+  max_area <- sum(perfect_cum_pct) / n
+  
+  # Calculate Gini coefficient
+  gini <- (model_area - random_area) / (max_area - random_area)
+  
+  # Return Gini value and data for Lorenz curve
+  return(list(
+    gini = gini,
+    x = (1:n) / n,  # Percentile of population
+    y_model = cum_actual_pct,  # Cumulative percentage of actual values for the model
+    y_perfect = perfect_cum_pct,  # Cumulative percentage for the perfect model
+    y_random = random_cum_pct  # Cumulative percentage for the random model
+  ))
+}
+
+# Function to plot Lorenz curve
+plot_lorenz_curve <- function(gini_data) {
+  lorenz_df <- data.frame(
+    x = rep(gini_data$x, 3),
+    y = c(gini_data$y_model, gini_data$y_perfect, gini_data$y_random),
+    Model = rep(c("Your Model", "Perfect Model", "Random Model"), each = length(gini_data$x))
+  )
+  
+  ggplot(lorenz_df, aes(x = x, y = y, color = Model)) +
+    geom_line(size = 1) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+    annotate("text", x = 0.5, y = 0.2, 
+             label = paste("Gini Index =", round(gini_data$gini, 4))) +
+    labs(title = "Lorenz Curve and Gini Index",
+         x = "Cumulative % of Policies",
+         y = "Cumulative % of Claims") +
+    theme_minimal() +
+    scale_color_manual(values = c("Your Model" = "blue", 
+                                  "Perfect Model" = "red", 
+                                  "Random Model" = "gray")) +
+    coord_fixed()
+}
+  
+  # Calculate Gini index
+  gini_result <- calculate_gini(test_data[["ClaimAmountMoyen"]],predictions)
+  cat("Gini Index:", gini_result$gini, "\n")
+  
+  # Plot Lorenz curve
+  lorenz_plot <- plot_lorenz_curve(gini_result)
+  print(lorenz_plot)
+  
+
+```
+Interpretation:
+--->A Gini index of 1 means your model is "perfect":
+--->It ranks all policies exactly correctly, so that the highest predicted risks capture all the claims immediately.
+--->The Lorenz curve jumps to 1 very quickly:
+--->This means that a very small percentage of policies (those your model ranks highest) account for 100% of the claims.
+---->this model is able to perfectly separate the claimants from the non-claimants.
+
+
+**Conclusion:**
+--> the lognormal_model is well performing than the weibull_model (AIC and MAPE metrics are lower than the metrics of the weibull_model). Then, we perform a stepwise selection based on the lognormal_model. 
+
+# Perform stepwise selection using AIC
+
+```{r}
+# Load required packages
+library(survival)
+library(MASS)  # For stepwise selection
+
+# 1. Start with the full model (including all potential predictors)
+full_model <- survreg(
+  Surv(time = train_data$ClaimAmountMoyen, event = rep(1, nrow(train_data))) ~ 
+    Brand + Region + Power + Gas + DriverAge + Density + 
+    CarAge + Density + offset(log(Exposure)),
+  data = train_data,
+  dist = "lognormal"
+)
+
+# Perform stepwise selection (backward)
+stepwise_model <- stepAIC(full_model,
+                         direction = "backward")
+
+# 3. Summarize the final stepwise model
+summary(stepwise_model)
+
+```
+**Interpretations:**
+
+--->Stepwise selection removed DriveAge to improve the model fit.
+
+--->Other variables (Brand, Region, Power, Gas, Density, CarAge) remained because their removal worsened the AIC.
+
+--->The final model is more optimized, focusing on the most significant predictors for ClaimAmountMoyen.
+
+```{r}
+# 4. Check model diagnostics
+# Residuals analysis
+residuals <- residuals(stepwise_model, type = "deviance")
+fitted_values <- predict(stepwise_model, type = "response")
+
+# Plot residuals
+par(mfrow = c(2, 2), mar = c(4, 4, 2, 1))
+plot(fitted_values, residuals, main = "Residuals vs. Fitted", 
+     xlab = "Fitted Values", ylab = "Deviance Residuals")
+abline(h = 0, lty = 2)
+
+qqnorm(residuals)
+qqline(residuals)
+
+hist(residuals, breaks = 30, main = "Histogram of Residuals")
+
+# 5. Calculate performance metrics
+test_predictions <- predict(stepwise_model, newdata = test_data, type = "response")
+
+# Calculate Mean Absolute Error (MAE)
+MAE <- mean(abs(test_data$ClaimAmountMoyen - test_predictions))
+
+# Calculate Root Mean Squared Error (RMSE)
+RMSE <- sqrt(mean((test_data$ClaimAmountMoyen - test_predictions)^2))
+
+# Print performance metrics
+cat("Mean Absolute Error:", MAE, "\n")
+cat("Root Mean Squared Error:", RMSE, "\n")
+
+# 6. Compare with previous models
+# You can use AIC or BIC to compare with your previous models
+cat("AIC of stepwise model:", AIC(stepwise_model), "\n")
+
+# If you have the previous lognormal model available
+cat("AIC of previous lognormal model:", AIC(lognormal_model), "\n")
+
+# 7. Plot actual vs. predicted values
+plot(test_data$ClaimAmountMoyen, test_predictions, 
+     main = "Actual vs. Predicted ClaimAmount Average",
+     xlab = "Actual ClaimAmount Average", ylab = "Predicted ClaimAmountAverage")
+abline(0, 1, col = "red", lty = 2)  # Add a 45-degree reference line
+```
+
+Interpretations:
+--->The model systematically underestimates the actual values, especially for larger claims.
+The pattern suggests the model is not capturing the true relationship and is biased toward under-predicting.
+--->The residuals are not normally distributed. There are heavy tails and outliers, which is typical when the model cannot capture rare, large values in the data.
+--->The model is often close to the actual value for small claims, but makes large errors for big claims (under-predicts them
+--->The model predicts almost the same small value for everyone, regardless of the actual claim amount.
+It fails to predict large claims at all.
+
+##Gini Index
+```{r}
+library(pROC)
+
+# Predictions on train and test data
+train_data$pred <- predict(stepwise_model, newdata = train_data, type = "response")
+test_data$pred <- predict(stepwise_model, newdata = test_data, type = "response")
+
+# Compute AUC for training and test datasets
+auc_train <- roc(train_data$ClaimAmountMoyen, train_data$pred)$auc
+auc_test <- roc(test_data$ClaimAmountMoyen, test_data$pred)$auc
+
+# Compute Gini index
+gini_train <- 2 * auc_train - 1
+gini_test <- 2 * auc_test - 1
+
+# Print results
+cat("Gini Index (Train):", gini_train, "\n")
+cat("Gini Index (Test):", gini_test, "\n")
+
+```
+
+**Interpretation:**
+-->Model Performance on Training Data (0.7264)
+
+   --->A high Gini index (close to 1) indicates that the model fits the training data well and has strong discriminatory power.
+
+   --->The model is able to distinguish between low and high claim amounts effectively.
+
+--->Model Performance on Test Data (0.6112)
+
+   --->The Gini index is lower on test data, but still above 0.6, meaning the model retains good predictive power on unseen data.
+
+  --->However, the drop from 0.72 → 0.61 suggests some overfitting.
+
+--->Overfitting Concern
+
+  --->The difference (0.7264 - 0.6112 ≈ 0.115) suggests that the model is slightly overfitting the training data.
+
+  --->The model might be learning patterns specific to the training set rather than generalizing well to new data.
+
+
+## Frequency model
+
+**Poisson model**
+```{r}
+glm_poisson <- glm(
+  ClaimNb ~ DriverAge + Brand + Region + Power, 
+  data = train_data,  # Assuming this is your training dataset
+  family = poisson(link = "log"),  # Poisson distribution with log link
+  offset = log(Exposure)  # Offset term for exposure
+)
+
+# Model summary
+summary(glm_poisson)
+# . Predict on test data
+test_data$predicted <- predict(glm_poisson, newdata = test_data, type = "response")
+```
+##Gini Index
+```{r}
+# Predictions on train and test data
+train_data$pred <- predict(glm_poisson, newdata = train_data, type = "response")
+test_data$pred <- predict(glm_poisson, newdata = test_data, type = "response")
+
+# Compute AUC for training and test datasets
+auc_train <- roc(train_data$ClaimNb, train_data$pred)$auc
+auc_test <- roc(test_data$ClaimNb, test_data$pred)$auc
+
+# Compute Gini index
+gini_train <- 2 * auc_train - 1
+gini_test <- 2 * auc_test - 1
+
+# Print results
+cat("Gini Index (Train):", gini_train, "\n")
+cat("Gini Index (Test):", gini_test, "\n")
+
+```
+Interpretations:
+--->Gini Index (Train): 0.2601646 
+    Gini Index (Test): 0.2666848 
+    ---> Both values are very low (~0.26), meaning the model has weak discriminatory power.
+
+----->A Gini index close to 0.25 - 0.30 suggests that the model is only slightly better than random guessing.
+
+**Negative  binomial **
+
+```{r}
+library(MASS)  # Ensure MASS library is loaded
+
+# Fit Negative Binomial GLM using MASS method
+glm_nb <- glm.nb(
+  ClaimNb ~ DriverAge + Brand + Region + Power + offset(log(Exposure)), 
+  data = train_data  # Offset term for exposure
+)
+
+# Model summary
+summary(glm_nb)
+# Predict on test data
+test_data$predicted <- predict(glm_nb, newdata = test_data, type = "response")
+```
+Interpretations:
+---> AIC(Poisson)<AIC(NB) then, we choose the Poisson model.
+
+##Gini Index
+```{r}
+# Predictions on train and test data
+train_data$pred <- predict(glm_nb, newdata = train_data, type = "response")
+test_data$pred <- predict(glm_nb, newdata = test_data, type = "response")
+
+# Compute AUC for training and test datasets
+auc_train <- roc(train_data$ClaimNb, train_data$pred)$auc
+auc_test <- roc(test_data$ClaimNb, test_data$pred)$auc
+
+# Compute Gini index
+gini_train <- 2 * auc_train - 1
+gini_test <- 2 * auc_test - 1
+
+# Print results
+cat("Gini Index (Train):", gini_train, "\n")
+cat("Gini Index (Test):", gini_test, "\n")
+
+```
+Interpretations:
+--->Gini Index (Train): 0.2601668 
+    Gini Index (Test): 0.266685 
+    ---> Both values are very low (~0.26), meaning the model has weak discriminatory power.
+
+----->A Gini index close to 0.25 - 0.30 suggests that the model is only slightly better than random guessing.
+
+**Perform stepwise selection using AIC**
+```{r}
+
+# Full model with all potential predictors
+full_model <- glm(
+  ClaimNb ~ Brand + Region + Power + Gas + DriverAge +     Density + CarAge + Density + offset(log(Exposure)),
+  data = train_data,
+  family = poisson(link = "log"),
+)
+
+# Stepwise selection
+step_model <- stepAIC(
+  full_model,
+  direction = "backward"#  backward selection
+)
+
+# Summary of the selected model
+summary(step_model)
+
+
+```
+
+**Interpretations:**
+Stepwise model AIC: 90951 < AIc(poison model)
+Previous Poisson model AIC=90951.49
+
+--->No Variables Removed:
+
+  ---->Since AIC remained the same, all variables in the original model are likely important.
+ 
+  ---->This suggests the model is already optimized in terms of variable selection.
+  
+##Gini Index
+
+```{r}
+# Predictions on train and test data
+train_data$pred <- predict(step_model, newdata = train_data, type = "response")
+test_data$pred <- predict(step_model, newdata = test_data, type = "response")
+
+# Compute AUC for training and test datasets
+auc_train <- roc(train_data$ClaimNb, train_data$pred)$auc
+auc_test <- roc(test_data$ClaimNb, test_data$pred)$auc
+
+# Compute Gini index
+gini_train <- 2 * auc_train - 1
+gini_test <- 2 * auc_test - 1
+
+# Print results
+cat("Gini Index (Train):", gini_train, "\n")
+cat("Gini Index (Test):", gini_test, "\n")
+
+```
+Interpretations:
+--->Gini Index (Train): 0.2762088  
+    Gini Index (Test):  0.2817732 
+    ---> Both values are very low (~0.28), meaning the model has weak discriminatory power.
+
+----->A Gini index close to 0.25 - 0.30 suggests that the model is only slightly better than random guessing.
+
+

@@ -1,0 +1,707 @@
+---
+title: "Workshop"
+author: "sahar chiha"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import the 1st Dataset 
+
+Import **freMTPLfreq** dataset:
+```{r}
+library(CASdatasets)
+data("freMTPLfreq",package = "CASdatasets")
+View(freMTPLfreq)
+```
+```{r}
+# Function to check if a variable has unique values
+has_unique_values <- function(data, column_name) {
+  unique_count <- length(unique(data[[column_name]]))
+  total_count <- nrow(data)
+  
+  if (unique_count == total_count) {
+    return(TRUE)
+  } else {
+    return(FALSE)
+  }
+}
+
+# Test the function
+column_to_check <- "PolicyID"
+if (has_unique_values(freMTPLfreq, column_to_check)) {
+  cat("The variable", column_to_check, "has all unique values.\n")
+} else {
+  cat("The variable", column_to_check, "does NOT have all unique values.\n")
+}
+```
+
+
+## Import the 2nd Databset 
+Import **freMTPLsev** dataaset:
+```{r}
+library(CASdatasets) ### RQ_Chaima : You don't need to reload the library; it's already stored in your environment since the first time you loaded it.
+data("freMTPLsev",package = "CASdatasets")
+View(freMTPLsev)
+
+```
+
+```{r}
+
+### RQ_Chaima : Do you really need to create the function has_unique_values that you have already used before ?
+# Function to check if a variable has unique values
+has_unique_values <- function(data, column_name) {
+  unique_count <- length(unique(data[[column_name]]))
+  total_count <- nrow(data)
+  
+  if (unique_count == total_count) {
+    return(TRUE)
+  } else {
+    return(FALSE)
+  }
+}
+
+# Test the function
+column_to_check <- "PolicyID"
+if (has_unique_values(freMTPLsev, column_to_check)) {
+  cat("The variable", column_to_check, "has all unique values.\n")
+} else {
+  cat("The variable", column_to_check, "does NOT have all unique values.\n")
+}
+```
+
+
+
+```{r}
+library(dplyr)
+freMTPLsev <- freMTPLsev %>%
+  group_by(PolicyID) %>%
+  summarise(ClaimAmount = sum(ClaimAmount))
+print(freMTPLsev)
+
+```
+---> Here, we have summed ClaimAmount for each PolicyID.
+
+## Data merging
+```{r}
+library(dplyr)
+freMTPLfreq$PolicyID = as.integer(freMTPLfreq$PolicyID)
+Dataset <- freMTPLfreq %>% left_join(freMTPLsev, by = "PolicyID")
+print(Dataset)
+```
+
+## Exploring the final Database
+```{r}
+head(Dataset)
+```
+**variable types**
+```{r}
+glimpse(Dataset)
+```
+## Data cleaning:
+**Missing values**
+```{r}
+# Check for NA values in the entire dataset
+is.na(Dataset)
+
+# Count NA values per column
+colSums(is.na(Dataset))
+
+# Check rows with complete cases (no NA values)
+complete.cases(Dataset)
+```
+--> Only the variable claimAmmount has missing values (nb missing values = 397779).
+
+
+```{r}
+# Check if all instances where claimNB is 0 also have claimAmount as 0
+check_claim <- all(is.na(Dataset$claimAmount[Dataset$claimNB == 0]))
+
+# Output the result
+if (check_claim) {
+  cat("All instances where claimNb is 0 also have claimAmount as NA.\n")
+} else {
+  cat("There are instances where claimNb is 0 but claimAmount is NOT NA.\n")
+}
+```
+Logically, if a Policy holder didn't affect any claim (claimNb=0),The claimAmmount should be 0.
+
+```{r}
+Dataset <- Dataset %>%
+  mutate(across(where(is.numeric), ~ ifelse(is.na(.), 0, .)))
+
+# Print updated data
+print("Data after replacing NA with 0:")
+print(Dataset)
+```
+
+**Duplicates**
+```{r}
+# Check for duplicate rows
+has_duplicates <- any(duplicated(Dataset))
+
+# Output the result
+if (has_duplicates) {
+  cat("The dataset contains duplicate rows.\n")
+} else {
+  cat("The dataset does NOT contain duplicate rows.\n")
+}
+```
+
+
+```{r}
+print(Dataset)
+```
+
+
+
+**Outliers**
+Checking if there are outliers in the dataset!
+```{r}
+library(dplyr)
+library(tidyr)
+library(tidyselect)
+library(ggplot2)
+
+#Exclude PolicyID feature
+Dataset <- Dataset %>% dplyr::select(-PolicyID)
+
+# Detect numeric columns
+numeric_columns <- Dataset %>% dplyr::select(where(is.numeric))
+
+# Detect factor columns
+factor_columns <- Dataset %>%dplyr:: select(where(is.factor) | where(is.character))
+
+# Reshape numeric columns for histograms
+if (ncol(numeric_columns) > 0) {
+  data_numeric_long <- numeric_columns %>%
+    pivot_longer(everything(), names_to = "variable", values_to = "value")
+  
+  # Plot histograms for numeric variables
+  ggplot(data_numeric_long, aes(x = value)) +
+    geom_histogram(binwidth = 10, fill = "blue", color = "black") +
+    facet_wrap(~ variable, scales = "free") +
+    labs(title = "Histograms of Numeric Variables",
+         x = "Value",
+         y = "Frequency") +
+    theme_minimal()
+} else {
+  cat("No numeric columns found.\n")
+}
+
+# Reshape factor columns for bar plots
+if (ncol(factor_columns) > 0) {
+  data_factor_long <- factor_columns %>%
+    pivot_longer(everything(), names_to = "variable", values_to = "value")
+  
+  # Plot bar plots for factor variables
+  ggplot(data_factor_long, aes(x = value)) +
+    geom_bar(fill = "pink", color = "black") +
+    facet_wrap(~ variable, scales = "free") +
+    labs(title = "Bar Plots of Factor Variables",
+         x = "Value",
+         y = "Frequency") +
+    theme_minimal()
+} else {
+  cat("No factor columns found.\n")
+}
+
+```
+RQ_Chaima : Could you interpret these plots for ClaimAmount and ClaimNb? Personally, I would challenge the visualization of these two variables to understand their distribution, either by adjusting the plot parameters or by applying bijective transformations to the variables, at least to gain visibility on their shape.
+
+
+```{r}
+print(Dataset)
+```
+
+Testing the normality of variables:
+
+RQ_Chaima: Why would you test the normality of the quantitative variables ?
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Detect numeric variables
+numeric_columns <- Dataset %>% dplyr::select(where(is.numeric))
+
+# Function to test normality using Kolmogorov-Smirnov test
+test_normality_ks <- function(data) {
+  results <- data %>%
+    summarise(across(everything(), ~ ks.test(., "pnorm", mean = mean(.), sd = sd(.))$p.value))  # KS test
+  return(results)
+}
+
+# Test normality for all numeric variables
+normality_results <- test_normality_ks(numeric_columns)
+
+# Identify normally and non-normally distributed variables
+normally_distributed <- normality_results %>% dplyr::select(where(~ all(. > 0.05)))  # p-value > 0.05
+non_normally_distributed <- normality_results %>% dplyr::select(where(~ all(. <= 0.05)))   # p-value <= 0.05
+
+# Print results
+cat("Normally Distributed Variables:\n")
+print(names(normally_distributed))
+
+cat("\nNon-Normally Distributed Variables:\n")
+print(names(non_normally_distributed))
+
+# Visualize distributions using density plots and Q-Q plots
+for (col in names(numeric_columns)) {
+  # Density plot
+  density_plot <- ggplot(Dataset, aes(x = .data[[col]])) +
+    geom_density(fill = "blue", alpha = 0.5) +
+    labs(title = paste("Density Plot of", col),
+         x = col,
+         y = "Density") +
+    theme_minimal()
+  
+  # Q-Q plot
+  qq_plot <- ggplot(Dataset, aes(sample = .data[[col]])) +
+    geom_qq() +
+    geom_qq_line(color = "red") +
+    labs(title = paste("Q-Q Plot of", col),
+         x = "Theoretical Quantiles",
+         y = "Sample Quantiles") +
+    theme_minimal()
+  
+  # Display plots
+  print(density_plot)
+  print(qq_plot)
+}
+```
+
+----> all the numeric variables are not normally distributed. Therefore, the Interquartile Range (IQR) Method is proposed to verify the existence of the outliers.
+
+
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+
+# Function to check for outliers using the IQR method
+check_outliers_iqr <- function(data, column) {
+  # Calculate Q1, Q3, and IQR
+  Q1 <- quantile(data[[column]], 0.25, na.rm = TRUE)
+  Q3 <- quantile(data[[column]], 0.75, na.rm = TRUE)
+  IQR <- Q3 - Q1
+  
+  # Define lower and upper bounds for outliers
+  lower_bound <- Q1 - 1.5 * IQR
+  upper_bound <- Q3 + 1.5 * IQR
+  
+  # Detect outliers
+  outliers <- data[[column]] < lower_bound | data[[column]] > upper_bound
+  
+  # Return TRUE if outliers are present, FALSE otherwise
+  return(any(outliers, na.rm = TRUE))
+}
+
+# Check for outliers in all numeric columns
+numeric_columns <- names(Dataset)[sapply(Dataset, is.numeric)]  # Get numeric column names
+outlier_summary <- sapply(numeric_columns, function(col) check_outliers_iqr(Dataset, col))
+
+# Print the outlier summary
+print(outlier_summary)
+
+# Optional: Visualize outliers using boxplots
+library(ggplot2)
+
+for (col in numeric_columns) {
+  boxplot <- ggplot(Dataset, aes(x = .data[[col]])) +
+    geom_boxplot(fill = "lightblue") +
+    labs(title = paste("Boxplot of", col),
+         x = col,
+         y = "Value") +
+    theme_minimal()
+  
+  print(boxplot)
+}
+
+```
+
+RQ_Chaima : Could you defend the transformations that you chose and explain them?
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(MASS)
+
+# Log transformation for claimAmount
+Dataset$ClaimAmount <- log(Dataset$ClaimAmount + 1)
+
+# Square root transformation for claimNb
+Dataset$ClaimNb <- sqrt(Dataset$ClaimNb)
+
+# Shift CarAge to make all values positive
+Dataset$CarAge <- Dataset$CarAge + 1
+
+# Box-Cox transformation for carAge
+bc <- boxcox(lm(CarAge ~ 1, data = Dataset))
+lambda <- bc$x[which.max(bc$y)]
+Dataset$CarAge <- (Dataset$CarAge^lambda - 1) / lambda
+
+# Cap extreme values in driveAge at the 95th percentile
+cap_value <- quantile(Dataset$DriverAge, 0.95, na.rm = TRUE)
+Dataset$DriverAge[Dataset$DriverAge > cap_value] <- cap_value
+
+# Standardize density
+Dataset$Density <- scale(Dataset$Density)
+
+# Visualize transformed data
+ggplot(Dataset, aes(y = ClaimAmount)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of Transformed claimAmount")
+```
+## Data description:
+```{r}
+summary(Dataset)
+```
+
+
+## Analyse univariée:
+
+```{r}
+print(Dataset)
+```
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+
+
+# Identify categorical var:
+qualitative_vars <- names(Dataset)[sapply(Dataset, function(x) is.character(x) | is.factor(x))]
+
+# Visualize plots of each categorical var
+for (var in qualitative_vars) {
+  p <- ggplot(Dataset, aes(x = Dataset[[var]])) +
+    geom_bar(fill = "steelblue") +
+    labs(
+      title = paste("Barplot of", var),
+      x = var,
+      y = "Frequency"
+    ) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+  
+  print(p)
+}
+```
+
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Identify numeric columns
+numeric_cols <- sapply(Dataset, is.numeric)
+
+#Extract numeric comlumns
+numeric_vars <- Dataset[, numeric_cols, drop = FALSE]
+
+# Descrptive statistic for numeric columns
+summary(numeric_vars)
+
+# Histogram for each numeric var
+for (col in colnames(numeric_vars)) {
+  hist(numeric_vars[[col]], 
+       main = paste("Histogram of", col), 
+       xlab = col, 
+       col = "steelblue")
+}
+
+# Boxplot for each numerci var
+for (col in colnames(numeric_vars)) {
+  boxplot(numeric_vars[[col]], 
+          main = paste("Boxplot of", col), 
+          col = "orange")
+}
+
+
+```
+
+
+
+## Analyse bivariée:
+```{r}
+print(Dataset)
+```
+
+```{r}
+library(corrplot)
+
+cor_matrix <- cor(Dataset[sapply(Dataset,is.numeric)], method = "pearson")
+cor_matrix
+```
+**Correlation Matrix:**
+```{r}
+cor_matrix <- corrplot(cor_matrix, method = "color", type = "upper", tl.col = "black", tl.srt = 45)
+```
+
+ 
+##Analyse bivariée:
+
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(stringi)
+
+# Load the French regions map
+url <- "https://github.com/gregoiredavid/france-geojson/raw/master/regions.geojson"
+France_map <- st_read(url)
+
+
+# Clean and harmonize region names in your dataset
+Dataset <- Dataset %>%
+  mutate(Region = tolower(trimws(Region)),  # Clean and lowercase region names
+         Region = stri_trans_general(Region, "Latin-ASCII"))  # Remove accents
+
+# Create a mapping of old region names to new region names
+region_mapping <- c(
+  "aquitaine" = "nouvelle-aquitaine",
+  "basse-normandie" = "normandie",
+  "haute-normandie" = "normandie",
+  "centre" = "centre-val de loire",
+  "limousin" = "nouvelle-aquitaine",
+  "nord-pas-de-calais" = "hauts-de-france",
+  "pays-de-la-loire" = "pays de la loire",
+  "poitou-charentes" = "nouvelle-aquitaine"
+)
+
+# Apply the mapping to your dataset
+Dataset <- Dataset %>%
+  mutate(Region = ifelse(Region %in% names(region_mapping), region_mapping[Region], Region))
+
+# Aggregate data by region
+region_claims <- Dataset %>%
+  group_by(Region) %>%
+  summarise(Total_Claim = sum(ClaimNb, na.rm = TRUE),
+            Total_ClaimAmount = sum(ClaimAmount, na.rm = TRUE))
+
+# Clean and harmonize region names in France_map
+France_map <- France_map %>%
+  mutate(nom = tolower(trimws(nom)),
+         nom = stri_trans_general(nom, "Latin-ASCII"))
+
+# Merge your dataset with France_map
+France_map <- France_map %>%
+  left_join(region_claims, by = c("nom" = "Region"))
+
+# Visualize the number of claims
+ggplot(data = France_map) +
+  geom_sf(aes(fill = Total_Claim), color = "black", size = 0.2) +
+  scale_fill_gradient(low = "lightblue", high = "red", na.value = "grey90", name = "Nb Sinistres") +
+  labs(title = "Nombre de sinistres par région en France") +
+  geom_sf_text(aes(label = nom), color = "black", size = 3) +
+  theme_minimal()
+
+# Visualize the total claim amount
+ggplot(data = France_map) +
+  geom_sf(aes(fill = Total_ClaimAmount), color = "black", size = 0.2) +
+  scale_fill_gradient(low = "lightblue", high = "red", na.value = "grey90", name = "Montant de Sinistres") +
+  labs(title = "Montant de sinistres par région en France") +
+  geom_sf_text(aes(label = nom), color = "black", size = 3) +
+  theme_minimal()
+```
+## Discretization of CarAge and DriverAge:
+```{r}
+ # Load necessary libraries
+library(dplyr)
+
+# Discretization of DriverAge into classes
+Dataset <- Dataset %>%
+  mutate(
+    DriverAge_Class = cut(
+      DriverAge,
+      breaks = c(0, 25, 40, 60, Inf),  # Define the intervals
+      labels = c("Young", "Adult", "Senior", "Elderly"),  # Class names in English
+      right = FALSE  # Include the lower bound, exclude the upper bound
+    )
+  )
+
+# Discretization of CarAge into classes
+Dataset <- Dataset %>%
+  mutate(
+    CarAge_Class = cut(
+      CarAge,
+      breaks = c(0, 5, 10, 15, Inf),  # Define the intervals
+      labels = c("New", "Young", "Middle-aged", "Old"),  # Class names in English
+      right = FALSE  # Include the lower bound, exclude the upper bound
+    )
+  )
+
+# Display the dataset with the new discretized variables
+print(Dataset)
+ 
+      
+
+```
+```{r}
+
+# Calculate average claim amount for each Brand and DriverAge
+average_claim <- Dataset %>%
+  group_by(Brand, DriverAge) %>%  # Group by Brand and AgeClass
+  summarise(
+    AverageClaimAmount = mean(ClaimAmount, na.rm = TRUE)  # Calculate average claim amount
+  ) %>%
+  ungroup()  # Ungroup to return a regular dataframe
+
+# Display the result
+print(average_claim)
+
+```
+
+
+```{r}
+   # Load ggplot2 for visualization
+library(ggplot2)
+
+# Plot for DriverAge classes
+ggplot(Dataset, aes(x = DriverAge_Class)) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Distribution of Driver Age Classes", x = "Driver Age Class", y = "Frequency") +
+  theme_minimal()
+
+# Plot for CarAge classes
+ggplot(Dataset, aes(x = CarAge_Class)) +
+  geom_bar(fill = "orange") +
+  labs(title = "Distribution of Car Age Classes", x = "Car Age Class", y = "Frequency") +
+  theme_minimal()
+```
+##Glm:
+  **TARGET FEATURE: ClaimAmmount **
+##Split the Data into Training and Test Sets
+```{r}
+# Créer un index pour diviser les données
+train_index <- sample(1:nrow(Dataset), 0.7 * nrow(Dataset))
+
+# Diviser les données
+train_data <- Dataset[train_index, ]  # 70% pour l'entraînement
+test_data <- Dataset[-train_index, ]  # 30% pour le test
+
+# Vérifier les dimensions des ensembles
+print(paste("Taille de l'ensemble d'entraînement :", nrow(train_data)))
+print(paste("Taille de l'ensemble de test :", nrow(test_data)))
+```
+
+##Check the Distribution of the Target Variable
+```{r}
+# Check the distribution of the target variable
+summary(train_data$ClaimAmount)
+summary(test_data$ClaimAmount)
+
+# Visualize the distribution (optional)
+par(mfrow = c(1, 2))
+hist(train_data$ClaimAmount, main = "Distribution of ClaimAmount (Training)", xlab = "ClaimAmount")
+hist(test_data$ClaimAmount, main = "Distribution of ClaimAmount (Test)", xlab = "ClaimAmount")
+```
+
+##Fit the GLM Model on the Training Set
+
+RQ_Chaima : Based on the histogram of ClaimAmount, do you think that the Gaussian family is the right one to model the losses? Personally, I notice a distribution with a mass at 0, asymmetric to the left, which is totally different from a Gaussian distribution, which is characterized by a symmetric shape.
+
+In addition to that, why would we use both the continuous and categorized variables of DriverAge, which are surely dependent ? The same applies to CarAge. 
+
+Do you think that we can use ClaimNB to predict ClaimAmount? I suppose that it's a random variable that we need to predict, right? The insurer doesn’t have this information at the time of underwriting the contract.
+
+```{r}
+# Fit the initial GLM model with all variables
+model <- glm(ClaimAmount ~ ., data = train_data, family = gaussian(link = "identity"), offset = log(train_data$Exposure))
+
+# Display the model summary
+summary(model)
+```
+
+
+##Evaluate the Model on the Test Set
+```{r}
+
+# Check for duplicates
+print(sum(duplicated(test_data)))
+
+# Remove duplicates (if necessary)
+test_data <- unique(test_data)
+
+# Predict values on the test set
+predictions <- predict(model, newdata = test_data, type = "response")
+
+# Check lengths
+print(length(test_data$ClaimAmount))
+print(length(predictions))
+
+# Calculate the error (e.g., Mean Squared Error)
+mse <- mean((test_data$ClaimAmount - predictions)^2)
+print(paste("Mean Squared Error (MSE) on the test set :", mse))
+
+# Visualize predictions vs actual values
+plot(test_data$ClaimAmount, predictions, main = "Predictions vs Actual", xlab = "Actual Values", ylab = "Predictions")
+abline(0, 1, col = "red")
+```
+```{r}
+regroup_modalites <- function(model, data) {
+  summary_model <- summary(model)
+  
+  # Ensure the coefficients matrix is valid
+  if (!is.matrix(summary_model$coefficients)) {
+    stop("Unexpected format: coefficients are not in matrix format.")
+  }
+
+  p_values <- summary_model$coefficients[, "Pr(>|t|)"]
+  
+  # Identify non-significant levels
+  non_significatives <- which(p_values > 0.05)
+
+  if (length(non_significatives) == 0) {
+    message("No non-significant levels found.")
+    return(data)
+  }
+
+  for (i in non_significatives) {
+    var_name <- rownames(summary_model$coefficients)[i]
+    
+    if (grepl("\\(", var_name)) {  # Check if it's a categorical level
+      base_var <- sub("\\(.*", "", var_name)
+      modalite <- sub(".*\\((.*)\\).*", "\\1", var_name)
+      
+      if (base_var %in% names(data)) {
+        data[[base_var]] <- factor(replace(as.character(data[[base_var]]), 
+                                           data[[base_var]] == modalite, 
+                                           "Reference"))
+      } else {
+        warning(paste("Variable", base_var, "not found in data."))
+      }
+    }
+  }
+
+  return(data)
+}
+
+# Apply the grouping function to the training set
+train_data <- regroup_modalites(model, train_data)
+
+   
+```
+
+
+```{r}
+# Apply the stepwise method
+step_model <- step(model, direction = "both")
+
+# Display the final model summary
+summary(step_model)
+```
+
+
+
