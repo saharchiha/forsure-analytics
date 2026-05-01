@@ -11,22 +11,6 @@ An end-to-end actuarial data science project for French Motor Third-Party Liabil
 ├── ANN_model.R                  # ANN model training script (Keras/TensorFlow)
 ├── prj.Rmd                      # Main analysis notebook
 ├── prj_version_annotée.Rmd      # Annotated version of the analysis
-├── data/
-│   ├── Dataset.rds              # Merged & preprocessed dataset
-│   ├── numeric_vars.rds
-│   ├── qualitative_vars.rds
-│   └── bi/
-│       ├── cor_matrix.rds
-│       ├── l.rds                # Map (claim amount)
-│       └── k.rds                # Map (claim frequency)
-├── models/
-│   ├── weibull.rds
-│   ├── lognormal_model.rds
-│   ├── stepwise_models.rds
-│   ├── glm_poisson.rds
-│   ├── glm_nb.rds
-│   ├── step_model.rds
-│   └── ann_model.h5
 └── README.md
 ```
 
